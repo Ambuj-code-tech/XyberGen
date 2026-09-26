@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#eef2ec">
+    <title>{% if mode == 'register' %}Create account{% elif mode == 'setup' %}Initial setup{% else %}Sign in{% endif %} | XyberGen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <main class="auth-layout">
+        <section class="brand-panel" aria-label="XyberGen">
+            <a class="wordmark" href="/" aria-label="XyberGen home">
+                <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>XyberGen</span>
+            </a>
+
+            <div class="brand-content">
+                <p class="eyebrow"><span class="status-dot"></span> ACCESS GATEWAY</p>
+                <h1>Move data<br>with <span>confidence.</span></h1>
+                <div class="pipeline" aria-hidden="true">
+                    <div class="pipeline-line"></div>
+                    <div class="pipeline-step"><span class="step-node">01</span><span>IDENTITY</span></div>
+                    <div class="pipeline-step"><span class="step-node">02</span><span>VALIDATION</span></div>
+                    <div class="pipeline-step"><span class="step-node">03</span><span>WORKSPACE</span></div>
+                </div>
+            </div>
+
+            <div class="panel-footer">
+                <span>XYBERGEN PLATFORM</span>
+                <span>EST. 2025</span>
+            </div>
+        </section>
+
+        <section class="form-panel" aria-labelledby="form-title">
+            <div class="form-topline"><span>{% if mode == 'register' %}CREATE ACCOUNT{% elif mode == 'setup' %}INITIAL SETUP{% else %}WORKSPACE SIGN IN{% endif %}</span><span class="lock-mark" aria-hidden="true">&#9670;</span></div>
+
+            <div class="form-heading">
+                <p class="eyebrow">{% if mode == 'register' %}JOIN THE WORKSPACE{% elif mode == 'setup' %}SECURE YOUR WORKSPACE{% else %}YOUR WORKSPACE AWAITS{% endif %}</p>
+                <h2 id="form-title">{% if mode == 'register' %}Create your account{% elif mode == 'setup' %}Create the first admin{% else %}Welcome back{% endif %}</h2>
+                <p class="form-copy">{% if mode == 'register' %}New accounts start with viewer access. An administrator can update your role later.{% elif mode == 'setup' %}Set up the administrator account before anyone can register.{% else %}Sign in to continue to XyberGen.{% endif %}</p>
+            </div>
+
+            {% if error %}
+            <p class="auth-message error-message" role="alert">{{ error }}</p>
+            {% endif %}
+
+            {% if mode == 'setup' %}
+            <p class="auth-message setup-message" role="status">First, create the administrator account. Public registration opens after setup and always assigns the viewer role.</p>
+            {% endif %}
+
+            {% if mode == 'setup' %}
+            <form action="/setup" method="POST" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label for="username">Administrator username</label>
+                <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+
+                <label for="password">Password</label>
+                <div class="password-control">
+                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="off" required>
+                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
+                </div>
+
+                <label for="password-confirmation">Confirm password</label>
+                <div class="password-control">
+                    <input id="password-confirmation" type="password" name="password_confirmation" placeholder="Enter it again" minlength="12" autocomplete="off" required>
+                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password-confirmation" aria-pressed="false">Show</button>
+                </div>
+
+                <button type="submit">Create administrator <span aria-hidden="true">&#8594;</span></button>
+            </form>
+            {% elif mode == 'register' %}
+            <form action="/register" method="POST" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label for="username">Username</label>
+                <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+
+                <label for="password">Password</label>
+                <div class="password-control">
+                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="off" required>
+                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
+                </div>
+
+                <label for="password-confirmation">Confirm password</label>
+                <div class="password-control">
+                    <input id="password-confirmation" type="password" name="password_confirmation" placeholder="Enter it again" minlength="12" autocomplete="off" required>
+                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password-confirmation" aria-pressed="false">Show</button>
+                </div>
+
+                <button type="submit">Create viewer account <span aria-hidden="true">&#8594;</span></button>
+            </form>
+            {% else %}
+            <form action="/login" method="POST" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label for="username">Username</label>
+                <input id="username" type="text" name="username" placeholder="Enter your username" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+
+                <div class="field-heading">
+                    <label for="password">Password</label>
+                </div>
+                <div class="password-control">
+                    <input id="password" type="password" name="password" placeholder="Enter your password" autocomplete="off" required>
+                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
+                </div>
+
+                <button type="submit">Sign in <span aria-hidden="true">&#8594;</span></button>
+            </form>
+            <p class="auth-switch">New to XyberGen? <a href="/register">Create an account</a></p>
+            {% endif %}
+        </section>
+    </main>
+    <script>
+        document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const password = document.getElementById(button.getAttribute("aria-controls"));
+                const isVisible = password.type === "text";
+                password.type = isVisible ? "password" : "text";
+                button.textContent = isVisible ? "Show" : "Hide";
+                button.setAttribute("aria-pressed", String(!isVisible));
+            });
+        });
+    </script>
+</body>
+</html>

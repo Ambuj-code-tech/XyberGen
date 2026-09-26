@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#eef2ec">
+    <title>{% if page == 'admin' %}User access{% elif page == 'reports' %}Reports{% else %}Workspace{% endif %} | XyberGen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="workspace-body">
+    <main class="workspace">
+        <header class="workspace-header">
+            <a class="workspace-brand" href="/dashboard">
+                <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>XyberGen</span>
+            </a>
+            <div class="account-menu">
+                <div class="account-copy">
+                    <strong>{{ username }}</strong>
+                    <span>{{ role }}</span>
+                </div>
+                <form action="/logout" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="signout-button" type="submit" aria-label="Sign out" title="Sign out">&#8594;</button>
+                </form>
+            </div>
+        </header>
+
+        <div class="workspace-body-layout">
+            <aside class="workspace-sidebar" aria-label="Workspace navigation">
+                <p class="sidebar-label">WORKSPACE</p>
+                <a class="nav-link {% if page == 'dashboard' %}active{% endif %}" href="/dashboard"><span>01</span> Overview</a>
+                {% if 'reports:view' in permissions %}
+                <a class="nav-link {% if page == 'reports' %}active{% endif %}" href="/reports"><span>02</span> Reports</a>
+                {% endif %}
+                {% if 'users:manage' in permissions %}
+                <p class="sidebar-label admin-label">ADMINISTRATION</p>
+                <a class="nav-link {% if page == 'admin' %}active{% endif %}" href="/admin/users"><span>03</span> User access</a>
+                {% endif %}
+                <div class="sidebar-role"><span class="status-dot"></span><span>Access level<br><strong>{{ role|title }}</strong></span></div>
+            </aside>
+
+            <section class="workspace-main">
+                {% if page == 'admin' %}
+                <div class="page-heading">
+                    <p class="eyebrow">ACCESS CONTROL / USERS</p>
+                    <h1>User access</h1>
+                    <p>Provision accounts and assign the least access each person needs.</p>
+                </div>
+                {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
+                {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
+
+                <div class="admin-grid">
+                    <section class="content-panel">
+                        <div class="section-heading"><div><p class="eyebrow">NEW ACCOUNT</p><h2>Add a user</h2></div><span class="panel-index">01</span></div>
+                        <form class="admin-form" action="/admin/users" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <label for="new-username">Username</label>
+                            <input id="new-username" name="username" type="text" minlength="3" maxlength="64" autocomplete="off" placeholder="e.g. jordan_lee" required>
+                            <label for="new-password">Temporary password</label>
+                            <input id="new-password" name="password" type="password" minlength="12" autocomplete="new-password" placeholder="At least 12 characters" required>
+                            <p class="role-default-note">New accounts receive the Viewer role. Change access below when needed.</p>
+                            <button type="submit">Create viewer account <span aria-hidden="true">&#8594;</span></button>
+                        </form>
+                    </section>
+
+                    <section class="content-panel user-list-panel">
+                        <div class="section-heading"><div><p class="eyebrow">DIRECTORY</p><h2>Accounts</h2></div><span class="panel-index">{{ users|length }}</span></div>
+                        <div class="user-list">
+                            {% for account in users %}
+                            <div class="user-row">
+                                <span class="user-avatar">{{ account.username[0]|upper }}</span>
+                                <span class="user-identity"><strong>{{ account.username }}</strong><small>{{ account.created_at[:10] }}</small></span>
+                                <form class="role-edit-form" action="/admin/users/{{ account.id }}/role" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <label class="visually-hidden" for="role-{{ account.id }}">Role for {{ account.username }}</label>
+                                    <select id="role-{{ account.id }}" name="role" aria-label="Role for {{ account.username }}">
+                                        <option value="viewer" {% if account.role_name == 'viewer' %}selected{% endif %}>Viewer</option>
+                                        <option value="analyst" {% if account.role_name == 'analyst' %}selected{% endif %}>Analyst</option>
+                                        <option value="admin" {% if account.role_name == 'admin' %}selected{% endif %}>Admin</option>
+                                    </select>
+                                    <button type="submit" aria-label="Save role for {{ account.username }}" title="Save role">&#10003;</button>
+                                </form>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </section>
+                </div>
+
+                <section class="role-guide">
+                    <p class="eyebrow">ROLE PERMISSIONS</p>
+                    <div class="role-guide-grid">
+                        <div><strong>Viewer</strong><span>Workspace overview</span></div>
+                        <div><strong>Analyst</strong><span>Overview and reports</span></div>
+                        <div><strong>Admin</strong><span>All areas and user management</span></div>
+                    </div>
+                </section>
+
+                {% elif page == 'reports' %}
+                <div class="page-heading">
+                    <p class="eyebrow">WORKSPACE / REPORTS</p>
+                    <h1>Reports</h1>
+                    <p>Your analyst or administrator role grants access to this area.</p>
+                </div>
+                <section class="content-panel report-placeholder">
+                    <span class="report-mark">02</span>
+                    <div><p class="eyebrow">REPORT ACCESS GRANTED</p><h2>Ready for your data</h2><p>Report data sources can be connected here. This page is protected by the <code>reports:view</code> permission.</p></div>
+                </section>
+
+                {% else %}
+                <div class="page-heading">
+                    <p class="eyebrow">XYBERGEN / OVERVIEW</p>
+                    <h1>Good to have you back, {{ username }}.</h1>
+                    <p>You are signed in with the <strong>{{ role }}</strong> role.</p>
+                </div>
+                <div class="overview-grid">
+                    <section class="content-panel access-panel">
+                        <div class="section-heading"><div><p class="eyebrow">YOUR ACCESS</p><h2>Permissions</h2></div><span class="panel-index">{{ permissions|length }}</span></div>
+                        <ul class="permission-list">
+                            {% for permission in permissions %}
+                            <li><span class="permission-check">&#10003;</span><code>{{ permission }}</code></li>
+                            {% endfor %}
+                        </ul>
+                    </section>
+                    <section class="access-summary">
+                        <p class="eyebrow">AUTHENTICATED SESSION</p>
+                        <div class="summary-role">{{ role[0]|upper }}</div>
+                        <h2>{{ role|title }} access</h2>
+                        <p>Navigation and protected pages are available according to your assigned role.</p>
+                    </section>
+                </div>
+                {% endif %}
+            </section>
+        </div>
+    </main>
+</body>
+</html>
