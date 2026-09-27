@@ -101,13 +101,30 @@
 
                 {% elif page == 'reports' %}
                 <div class="page-heading">
-                    <p class="eyebrow">WORKSPACE / REPORTS</p>
+                    <p class="eyebrow">WORKSPACE / VERIFIED OUTPUT</p>
                     <h1>Reports</h1>
-                    <p>Your analyst or administrator role grants access to this area.</p>
+                    <p>Review verified, rehydrated transformations from documents you submitted.</p>
                 </div>
-                <section class="content-panel report-placeholder">
-                    <span class="report-mark">02</span>
-                    <div><p class="eyebrow">REPORT ACCESS GRANTED</p><h2>Ready for your data</h2><p>Report data sources can be connected here. This page is protected by the <code>reports:view</code> permission.</p></div>
+                <section class="content-panel report-feed" aria-labelledby="report-feed-title">
+                    <div class="section-heading">
+                        <div><p class="eyebrow">DOCUMENT FEED</p><h2 id="report-feed-title">Transformations by document</h2></div>
+                        <span class="panel-index">00</span>
+                    </div>
+                    <p class="report-safety-note">Only verified, rehydrated content belongs here. Raw uploads and unverified model output are never shown in Reports.</p>
+                    <div class="report-toolbar" aria-label="Report filters">
+                        <div class="report-filters" role="group" aria-label="Filter by transformation type">
+                            <button type="button" class="report-filter active" aria-pressed="true" disabled>All outputs</button>
+                            <button type="button" class="report-filter" aria-pressed="false" disabled>Infographics</button>
+                            <button type="button" class="report-filter" aria-pressed="false" disabled>X Posts</button>
+                            <button type="button" class="report-filter" aria-pressed="false" disabled>Storyboards</button>
+                        </div>
+                        <label class="report-search-label" for="report-search">Search documents</label>
+                        <input id="report-search" class="report-search" type="search" placeholder="Search verified results" disabled>
+                    </div>
+                    <div class="report-empty-state" role="status">
+                        <span class="report-mark" aria-hidden="true">00</span>
+                        <div><h3>No verified reports yet</h3><p>When processing is connected, each document and its verified transformations and related chats will appear together here.</p></div>
+                    </div>
                 </section>
 
                 {% else %}
@@ -132,6 +149,32 @@
                         <p>Navigation and protected pages are available according to your assigned role.</p>
                     </section>
                 </div>
+                {% if 'reports:view' in permissions %}
+                <section class="content-panel ingest-panel" aria-labelledby="ingest-title">
+                    <div class="section-heading"><div><p class="eyebrow">INTAKE / NEW SOURCE</p><h2 id="ingest-title">Upload a document</h2></div><span class="panel-index">01</span></div>
+                    <p class="ingest-intro">Submit a source to begin masking and one-way transfer. Upload is unavailable until the ingestion service is connected.</p>
+                    <form class="ingest-form" action="/api/documents/ingest" method="POST" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <label for="document-type">Document type</label>
+                        <select id="document-type" name="document_type" required disabled>
+                            <option value="" disabled selected>Select a type</option>
+                            <option value="pdf">PDF</option>
+                            <option value="scan">Scanned document</option>
+                            <option value="audio">Audio recording</option>
+                            <option value="intercept_log">Intercept log</option>
+                        </select>
+                        <label for="source-file">File</label>
+                        <input id="source-file" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.wav,.mp3,.m4a,.aac,.ogg,.flac,.txt,.log,.csv,.json" required disabled>
+                        <label for="document-description">Description <span>(optional)</span></label>
+                        <textarea id="document-description" name="description" rows="3" maxlength="500" placeholder="Add context for the ingestion team" disabled></textarea>
+                        <button type="submit" disabled>Pipeline connection pending</button>
+                    </form>
+                </section>
+                <section class="content-panel activity-panel" aria-labelledby="activity-title">
+                    <div class="section-heading"><div><p class="eyebrow">INTAKE HISTORY</p><h2 id="activity-title">Your recent submissions</h2></div><span class="panel-index">00</span></div>
+                    <p class="activity-empty">Submission history will appear here after the ingestion service is connected. History is intended to be scoped to the submitter, with workspace-wide administrator review.</p>
+                </section>
+                {% endif %}
                 {% endif %}
             </section>
         </div>

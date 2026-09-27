@@ -646,6 +646,90 @@ form button span {
     background: #fff;
 }
 
+.ingest-panel {
+    margin-top: 19px;
+}
+
+.activity-panel {
+    margin-top: 19px;
+}
+
+.ingest-intro {
+    margin: 17px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.ingest-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    align-items: center;
+    gap: 12px 18px;
+    margin-top: 15px;
+}
+
+.ingest-form label {
+    margin: 0;
+}
+
+.ingest-form label span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.ingest-form input[type="file"],
+.ingest-form select,
+.ingest-form textarea {
+    width: 100%;
+    min-width: 0;
+    min-height: 43px;
+    padding: 10px 11px;
+    border: 1px solid #dce2dc;
+    border-radius: 3px;
+    color: var(--ink);
+    background: #fbfcfa;
+    font: inherit;
+    font-size: 11px;
+}
+
+.ingest-form input[type="file"] {
+    height: auto;
+    padding: 8px;
+}
+
+.ingest-form textarea {
+    resize: vertical;
+}
+
+.ingest-form input[type="file"]:focus-visible,
+.ingest-form select:focus-visible,
+.ingest-form textarea:focus-visible {
+    outline: 3px solid rgba(93, 136, 113, 0.25);
+    border-color: #5d8871;
+}
+
+.ingest-form :disabled {
+    color: #78827b;
+    background: #f2f4f1;
+    cursor: not-allowed;
+}
+
+.ingest-form button:disabled {
+    justify-content: center;
+    border: 1px solid #dce2dc;
+    color: #69756d;
+    background: #edf0ec;
+    font-size: 11px;
+    transform: none;
+}
+
+.ingest-form button {
+    grid-column: 2;
+    margin-top: 0;
+}
+
 .section-heading {
     display: flex;
     align-items: center;
@@ -968,6 +1052,110 @@ form button span {
     line-height: 1.6;
 }
 
+.report-feed {
+    padding-bottom: 0;
+}
+
+.report-safety-note {
+    margin: 15px 0 0;
+    padding: 11px 13px;
+    border-left: 3px solid #668d42;
+    color: #46564b;
+    background: #f3f7ee;
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.report-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 19px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--line);
+}
+
+.report-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.report-filter {
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid #dce2dc;
+    border-radius: 2px;
+    color: #59655d;
+    background: #fff;
+    font: inherit;
+    font-size: 10px;
+}
+
+.report-filter.active {
+    border-color: #315c43;
+    color: #fff;
+    background: #315c43;
+}
+
+.report-filter:disabled,
+.report-search:disabled {
+    cursor: not-allowed;
+    opacity: 0.72;
+}
+
+.report-search-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+}
+
+.report-search {
+    width: min(100%, 220px);
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid #dce2dc;
+    border-radius: 2px;
+    color: var(--ink);
+    background: #fbfcfa;
+    font: inherit;
+    font-size: 10px;
+}
+
+.report-empty-state {
+    display: flex;
+    min-height: 190px;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 26px;
+}
+
+.report-empty-state h3 {
+    margin: 0;
+    font-size: 14px;
+}
+
+.report-empty-state p,
+.activity-empty {
+    max-width: 560px;
+    margin: 7px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.7;
+}
+
+.activity-empty {
+    max-width: none;
+    margin-top: 16px;
+}
+
 @keyframes arrive {
     from {
         opacity: 0;
@@ -1075,6 +1263,34 @@ form button span {
     .overview-grid,
     .admin-grid {
         grid-template-columns: 1fr;
+    }
+
+    .ingest-form {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .ingest-form label:not(:first-of-type) {
+        margin-top: 6px;
+    }
+
+    .ingest-form button {
+        grid-column: 1;
+        margin-top: 8px;
+    }
+
+    .report-toolbar {
+        align-items: stretch;
+    }
+
+    .report-search {
+        width: 100%;
+    }
+
+    .report-empty-state {
+        align-items: flex-start;
+        justify-content: flex-start;
+        padding: 22px 0;
     }
 
     .access-summary {

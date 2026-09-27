@@ -53,7 +53,7 @@
             {% endif %}
 
             {% if mode == 'setup' %}
-            <form action="/setup" method="POST" autocomplete="off">
+            <form action="/setup" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="username">Administrator username</label>
                 <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
@@ -73,7 +73,7 @@
                 <button type="submit">Create administrator <span aria-hidden="true">&#8594;</span></button>
             </form>
             {% elif mode == 'register' %}
-            <form action="/register" method="POST" autocomplete="off">
+            <form action="/register" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="username">Username</label>
                 <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
@@ -93,7 +93,7 @@
                 <button type="submit">Create viewer account <span aria-hidden="true">&#8594;</span></button>
             </form>
             {% else %}
-            <form action="/login" method="POST" autocomplete="off">
+            <form action="/login" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="username">Username</label>
                 <input id="username" type="text" name="username" placeholder="Enter your username" autocomplete="off" autocapitalize="none" spellcheck="false" required>
