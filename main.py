@@ -1,21 +1,45 @@
 import hashlib
 import hmac
+import importlib.util
 import os
 import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterator
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def load_environment() -> None:
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):]
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ[key.strip()] = value.strip().strip('"\'')
+    for key in ("GROQ_API_KEY", "OPENAI_API_KEY", "XYBERGEN_MODEL", "XYBERGEN_ADMIN_USERNAME", "XYBERGEN_ADMIN_PASSWORD"):
+        if key in os.environ:
+            os.environ[key] = str(os.environ[key]).strip().strip('"\'')
+    load_dotenv(env_path, override=True)
+
+
+load_environment()
 DATABASE_PATH = Path(os.environ.get("XYBERGEN_DATABASE", BASE_DIR / "xybergen.sqlite3"))
 SESSION_COOKIE = "xybergen_session"
 LOGIN_CSRF_COOKIE = "xybergen_login_csrf"
@@ -30,6 +54,15 @@ ROLE_PERMISSIONS = {
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+_AGENT_PATH = BASE_DIR / "backemd." / "agent.py"
+generate_document_output = None
+if _AGENT_PATH.exists():
+    spec = importlib.util.spec_from_file_location("xybergen_agent", _AGENT_PATH)
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        generate_document_output = getattr(module, "generate_document_output", None)
 
 
 @contextmanager
@@ -67,6 +100,37 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
+CONTEXT_OPTIONS = ["emergency", "announcement", "casual"]
+OUTPUT_FORMAT_OPTIONS = [
+    "LinkedIn post",
+    "X post",
+    "Summary",
+    "Presentation",
+    "Script",
+    "Image",
+    "Document",
+    "Custom",
+]
+ALLOWED_UPLOAD_MIME_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mp4",
+    "audio/m4a",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+}
 
 
 def initialize_database() -> None:
@@ -99,6 +163,42 @@ def initialize_database() -> None:
                 csrf_token TEXT NOT NULL,
                 expires_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS uploaded_documents (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                file_data BLOB NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS document_output_options (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                document_id INTEGER NOT NULL REFERENCES uploaded_documents(id) ON DELETE CASCADE,
+                context TEXT,
+                target_audience TEXT,
+                output_formats TEXT,
+                custom_outputs TEXT,
+                output_format_1 TEXT,
+                output_format_2 TEXT,
+                output_format_3 TEXT,
+                output_format_4 TEXT,
+                custom_output_1 TEXT,
+                custom_output_2 TEXT,
+                custom_output_3 TEXT,
+                custom_output_4 TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, document_id)
+            );
+            CREATE TABLE IF NOT EXISTS memory_documents (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
         for role, permissions in ROLE_PERMISSIONS.items():
@@ -129,6 +229,75 @@ def initialize_database() -> None:
 
 
 initialize_database()
+
+
+def ensure_document_output_schema() -> None:
+    with get_connection() as connection:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(document_output_options)").fetchall()]
+        if "context" not in columns:
+            connection.execute("ALTER TABLE document_output_options ADD COLUMN context TEXT")
+        if "target_audience" not in columns:
+            connection.execute("ALTER TABLE document_output_options ADD COLUMN target_audience TEXT")
+        if "output_formats" not in columns:
+            connection.execute("ALTER TABLE document_output_options ADD COLUMN output_formats TEXT")
+        if "custom_outputs" not in columns:
+            connection.execute("ALTER TABLE document_output_options ADD COLUMN custom_outputs TEXT")
+
+
+def build_summary_pdf(title: str, summary_text: str) -> bytes:
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    except ImportError:  # pragma: no cover - optional dependency path
+        raise RuntimeError("reportlab is required to generate PDF exports")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=0.8 * inch,
+        leftMargin=0.8 * inch,
+        topMargin=0.8 * inch,
+        bottomMargin=0.8 * inch,
+        pageCompression=0,
+    )
+    story = []
+
+    title_text = (title or "Executive Summary").strip() or "Executive Summary"
+    story.append(
+        Paragraph(
+            title_text,
+            ParagraphStyle(name="TitleStyle", fontName="Helvetica-Bold", fontSize=22, leading=26, spaceAfter=18),
+        )
+    )
+
+    body = summary_text.strip() or "Executive summary content is unavailable."
+    for block in body.split("\n\n") or [body]:
+        paragraph_text = block.strip()
+        if not paragraph_text:
+            story.append(Spacer(1, 0.12 * inch))
+            continue
+        story.append(
+            Paragraph(
+                paragraph_text,
+                ParagraphStyle(
+                    name="BodyStyle",
+                    fontName="Helvetica",
+                    fontSize=12,
+                    leading=18,
+                    alignment=0,
+                    spaceAfter=12,
+                ),
+            )
+        )
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+ensure_document_output_schema()
 
 
 def get_user_session(request: Request) -> tuple[sqlite3.Row, str] | None:
@@ -212,6 +381,26 @@ def user_context(request: Request, user: sqlite3.Row) -> dict[str, Any]:
         "users": users if user["role_name"] == "admin" else [],
         "csrf_token": session[0]["csrf_token"] if session else "",
     }
+
+
+def get_uploaded_documents(user_id: int, limit: int = 10) -> list[sqlite3.Row]:
+    with get_connection() as connection:
+        return connection.execute(
+            """SELECT d.id, d.title, d.original_name, d.mime_type, d.size_bytes, d.created_at,
+                      o.context, o.target_audience, o.output_formats, o.custom_outputs,
+                      o.output_format_1, o.output_format_2, o.output_format_3, o.output_format_4,
+                      o.custom_output_1, o.custom_output_2, o.custom_output_3, o.custom_output_4
+               FROM uploaded_documents d
+               LEFT JOIN document_output_options o ON o.document_id = d.id AND o.user_id = d.user_id
+               WHERE d.user_id = ?
+               ORDER BY d.created_at DESC, d.id DESC
+               LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+
+
+def get_memory_documents(user_id: int, limit: int = 10) -> list[sqlite3.Row]:
+    return get_uploaded_documents(user_id, limit)
 
 
 def csrf_is_valid(request: Request, submitted_token: str) -> bool:
@@ -460,6 +649,287 @@ async def dashboard(request: Request):
     context = user_context(request, user)
     context["page"] = "dashboard"
     return render_template(request, "dashboard.html", context)
+
+
+@app.get("/dashboard/upload", response_class=HTMLResponse)
+async def upload_dashboard(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_has_permission(user["id"], "dashboard:view"):
+        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+    context = user_context(request, user)
+    context.update({
+        "page": "upload",
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+        "uploaded_documents": get_uploaded_documents(user["id"]),
+    })
+    return render_template(request, "dashboard.html", context)
+
+
+@app.get("/dashboard/memory", response_class=HTMLResponse)
+async def memory_dashboard(request: Request):
+    return RedirectResponse("/dashboard/upload", status_code=303)
+
+
+@app.post("/dashboard/upload")
+async def save_uploaded_document(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_has_permission(user["id"], "dashboard:view"):
+        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    title = str(form.get("title", "")).strip()
+    uploaded_file = form.get("document")
+    if not title:
+        return RedirectResponse("/dashboard/upload?error=Add+a+title+for+your+upload", status_code=303)
+    if len(title) > 200:
+        return RedirectResponse("/dashboard/upload?error=Title+must+be+200+characters+or+less", status_code=303)
+    if uploaded_file is None or getattr(uploaded_file, "filename", "") == "":
+        return RedirectResponse("/dashboard/upload?error=Choose+a+supported+document,+image,+audio+or+video+file", status_code=303)
+
+    filename = str(getattr(uploaded_file, "filename", "")).strip()
+    mime_type = str(getattr(uploaded_file, "content_type", "") or "application/octet-stream").strip().lower()
+    file_data = await uploaded_file.read()
+    if not filename:
+        return RedirectResponse("/dashboard/upload?error=Choose+a+supported+document,+image,+audio+or+video+file", status_code=303)
+    if mime_type not in ALLOWED_UPLOAD_MIME_TYPES and not filename.lower().endswith(
+        (".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp3", ".wav", ".m4a", ".mp4", ".mov", ".webm")
+    ):
+        return RedirectResponse("/dashboard/upload?error=Only+docs,+PDF,+images,+audio,+and+video+files+are+allowed", status_code=303)
+    if not file_data:
+        return RedirectResponse("/dashboard/upload?error=The+selected+file+is+empty", status_code=303)
+
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """INSERT INTO uploaded_documents (user_id, title, original_name, mime_type, size_bytes, file_data, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (user["id"], title, filename, mime_type, len(file_data), file_data, datetime.now(timezone.utc).isoformat()),
+        )
+        document_id = cursor.lastrowid
+    return RedirectResponse(f"/dashboard/upload/{document_id}/configure?success=Upload+saved", status_code=303)
+
+
+@app.get("/dashboard/upload/{document_id}/configure", response_class=HTMLResponse)
+async def configure_uploaded_document(document_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_has_permission(user["id"], "dashboard:view"):
+        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+
+    with get_connection() as connection:
+        document = connection.execute(
+            """SELECT d.id, d.title, d.original_name, d.mime_type, d.created_at,
+                      o.context, o.target_audience, o.output_formats, o.custom_outputs
+               FROM uploaded_documents d
+               LEFT JOIN document_output_options o ON o.document_id = d.id AND o.user_id = d.user_id
+               WHERE d.id = ? AND d.user_id = ?""",
+            (document_id, user["id"]),
+        ).fetchone()
+        if not document:
+            return RedirectResponse("/dashboard/upload?error=Upload+not+found", status_code=303)
+
+    context = user_context(request, user)
+    context.update({
+        "page": "upload-configure",
+        "document": document,
+        "context_options": CONTEXT_OPTIONS,
+        "output_format_options": OUTPUT_FORMAT_OPTIONS,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+        "selected_output_formats": (document["output_formats"] or "").split(", ") if document["output_formats"] else [],
+    })
+    return render_template(request, "dashboard.html", context)
+
+
+@app.post("/dashboard/upload/{document_id}/configure")
+async def save_document_output_options(document_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_has_permission(user["id"], "dashboard:view"):
+        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    context = str(form.get("context", "")).strip().lower()
+    target_audience = str(form.get("target_audience", "")).strip()
+    output_formats = form.getlist("output_formats") or ["Executive Summary"]
+    custom_outputs = str(form.get("custom_outputs", "")).strip()
+
+    if context not in CONTEXT_OPTIONS:
+        return RedirectResponse(f"/dashboard/upload/{document_id}/configure?error=Choose+a+valid+context", status_code=303)
+    if not target_audience:
+        return RedirectResponse(f"/dashboard/upload/{document_id}/configure?error=Add+a+target+audience", status_code=303)
+
+    with get_connection() as connection:
+        document = connection.execute(
+            "SELECT id FROM uploaded_documents WHERE id = ? AND user_id = ?",
+            (document_id, user["id"]),
+        ).fetchone()
+        if not document:
+            return RedirectResponse("/dashboard/upload?error=Upload+not+found", status_code=303)
+
+        connection.execute(
+            """INSERT INTO document_output_options (
+                   user_id, document_id, context, target_audience, output_formats, custom_outputs,
+                   created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, document_id)
+               DO UPDATE SET
+                   context = excluded.context,
+                   target_audience = excluded.target_audience,
+                   output_formats = excluded.output_formats,
+                   custom_outputs = excluded.custom_outputs,
+                   created_at = excluded.created_at""",
+            (
+                user["id"],
+                document_id,
+                context,
+                target_audience,
+                ", ".join(output_formats),
+                custom_outputs,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    return RedirectResponse(f"/dashboard/upload/{document_id}/configure?success=Details+saved", status_code=303)
+
+
+@app.post("/dashboard/upload/{document_id}/generate")
+async def generate_document_output_for_user(document_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return JSONResponse({"error": "Sign in to continue."}, status_code=401)
+    user = session[0]
+    if not user_has_permission(user["id"], "dashboard:view"):
+        return JSONResponse({"error": "Permission denied."}, status_code=403)
+
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return JSONResponse({"error": "Invalid request token."}, status_code=403)
+
+    with get_connection() as connection:
+        document_profile = connection.execute(
+            """SELECT d.id, d.title, d.original_name, d.mime_type,
+                      o.context, o.target_audience, o.output_formats, o.custom_outputs
+               FROM uploaded_documents d
+               LEFT JOIN document_output_options o ON o.document_id = d.id AND o.user_id = d.user_id
+               WHERE d.id = ? AND d.user_id = ?""",
+            (document_id, user["id"]),
+        ).fetchone()
+
+    if not document_profile:
+        return JSONResponse({"error": "No uploaded document found."}, status_code=404)
+
+    context = str(form.get("context", "") or document_profile["context"] or "announcement").strip().lower()
+    target_audience = str(form.get("target_audience", "") or document_profile["target_audience"] or "general audience").strip()
+    custom_outputs = str(form.get("custom_outputs", "") or document_profile["custom_outputs"] or "").strip()
+    user_prompt = str(form.get("user_prompt", "") or form.get("summary_prompt", "") or "").strip()
+    output_format = str(form.get("output_format", "Executive Summary")).strip() or "Executive Summary"
+
+    if context not in CONTEXT_OPTIONS:
+        context = "announcement"
+    if not target_audience:
+        target_audience = "general audience"
+    if not user_prompt:
+        user_prompt = (
+            f"Create an executive summary for '{document_profile['title']}' "
+            f"for the {target_audience} audience. "
+            f"Use the {context} context and focus on the most important points."
+        )
+        if custom_outputs:
+            user_prompt = f"{user_prompt} Additional guidance: {custom_outputs}."
+
+    with get_connection() as connection:
+        connection.execute(
+            """INSERT INTO document_output_options (
+                   user_id, document_id, context, target_audience, output_formats, custom_outputs,
+                   created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, document_id)
+               DO UPDATE SET
+                   context = excluded.context,
+                   target_audience = excluded.target_audience,
+                   output_formats = excluded.output_formats,
+                   custom_outputs = excluded.custom_outputs,
+                   created_at = excluded.created_at""",
+            (
+                user["id"],
+                document_id,
+                context,
+                target_audience,
+                "Executive Summary",
+                custom_outputs,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+        document_profile = connection.execute(
+            """SELECT d.id, d.title, d.original_name, d.mime_type,
+                      o.context, o.target_audience, o.output_formats, o.custom_outputs
+               FROM uploaded_documents d
+               LEFT JOIN document_output_options o ON o.document_id = d.id AND o.user_id = d.user_id
+               WHERE d.id = ? AND d.user_id = ?""",
+            (document_id, user["id"]),
+        ).fetchone()
+
+    if generate_document_output is None:
+        return JSONResponse({"error": "Agent workflow is not available."}, status_code=503)
+
+    result = generate_document_output(
+        {
+            "document_id": document_profile["id"],
+            "title": document_profile["title"],
+            "original_name": document_profile["original_name"],
+            "mime_type": document_profile["mime_type"],
+            "context": document_profile["context"],
+            "target_audience": document_profile["target_audience"],
+            "output_formats": document_profile["output_formats"],
+            "custom_outputs": document_profile["custom_outputs"],
+        },
+        user_prompt,
+        output_format,
+    )
+
+    safe_title = (document_profile["title"] or "executive-summary").strip() or "executive-summary"
+    safe_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in safe_title).strip("-") or "executive-summary"
+
+    try:
+        pdf_bytes = build_summary_pdf(safe_title.replace("-", " ").title(), result)
+    except RuntimeError:
+        pdf_bytes = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{safe_title}.pdf"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/dashboard/upload/{document_id}/options")
+async def save_legacy_output_options(document_id: int, request: Request):
+    return await save_document_output_options(document_id, request)
+
+
+@app.post("/dashboard/memory")
+async def save_memory_document(request: Request):
+    return await save_uploaded_document(request)
 
 
 @app.get("/reports", response_class=HTMLResponse)
