@@ -477,18 +477,51 @@ form button span {
 }
 
 .account-menu .signout-button {
-    display: grid;
-    width: 36px;
+    display: flex;
     height: 36px;
-    place-items: center;
+    min-height: 36px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     margin: 0;
-    padding: 0;
-    border: 1px solid var(--line);
+    padding: 0 10px 0 13px;
+    border: 1px solid var(--forest);
+    border-radius: 3px;
+    color: #f4f6ed;
+    background: var(--forest);
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.account-menu .signout-button span {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    place-items: center;
     border-radius: 50%;
     color: var(--forest);
-    background: #fff;
-    font-size: 18px;
-    cursor: pointer;
+    background: var(--lime);
+    font-size: 13px;
+    line-height: 1;
+    transition: transform 160ms ease;
+}
+
+.account-menu .signout-button:hover {
+    background: #1d5142;
+    box-shadow: 0 4px 12px rgba(21, 61, 50, 0.18);
+    transform: translateY(-1px);
+}
+
+.account-menu .signout-button:hover span {
+    transform: translateX(2px);
+}
+
+.account-menu .signout-button:focus-visible {
+    outline: 3px solid #769950;
+    outline-offset: 3px;
 }
 
 .workspace-body-layout {

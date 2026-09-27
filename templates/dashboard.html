@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=signout-2">
 </head>
 <body class="workspace-body">
     <main class="workspace">
@@ -24,7 +24,7 @@
                 </div>
                 <form action="/logout" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="signout-button" type="submit" aria-label="Sign out" title="Sign out">&#8594;</button>
+                    <button class="signout-button" type="submit">Sign out <span aria-hidden="true">&#8594;</span></button>
                 </form>
             </div>
         </header>
