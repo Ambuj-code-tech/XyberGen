@@ -33,12 +33,13 @@
             <aside class="workspace-sidebar" aria-label="Workspace navigation">
                 <p class="sidebar-label">WORKSPACE</p>
                 <a class="nav-link {% if page == 'dashboard' %}active{% endif %}" href="/dashboard"><span>01</span> Overview</a>
+                <a class="nav-link {% if page == 'upload' %}active{% endif %}" href="/dashboard/upload"><span>02</span> Upload</a>
                 {% if 'reports:view' in permissions %}
-                <a class="nav-link {% if page == 'reports' %}active{% endif %}" href="/reports"><span>02</span> Reports</a>
+                <a class="nav-link {% if page == 'reports' %}active{% endif %}" href="/reports"><span>03</span> Reports</a>
                 {% endif %}
                 {% if 'users:manage' in permissions %}
                 <p class="sidebar-label admin-label">ADMINISTRATION</p>
-                <a class="nav-link {% if page == 'admin' %}active{% endif %}" href="/admin/users"><span>03</span> User access</a>
+                <a class="nav-link {% if page == 'admin' %}active{% endif %}" href="/admin/users"><span>04</span> User access</a>
                 {% endif %}
                 <div class="sidebar-role"><span class="status-dot"></span><span>Access level<br><strong>{{ role|title }}</strong></span></div>
             </aside>
@@ -98,6 +99,121 @@
                         <div><strong>Admin</strong><span>All areas and user management</span></div>
                     </div>
                 </section>
+
+                {% elif page == 'upload' %}
+                <div class="page-heading">
+                    <p class="eyebrow">WORKSPACE / UPLOAD</p>
+                    <h1>Upload</h1>
+                    <p>Submit documents, images, audio, or video files from your own archive or memory.</p>
+                </div>
+                {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
+                {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
+
+                <div class="memory-grid">
+                    <section class="content-panel memory-form-panel">
+                        <div class="section-heading"><div><p class="eyebrow">NEW FILE</p><h2>Upload your source</h2></div><span class="panel-index">01</span></div>
+                        <form class="memory-form" action="/dashboard/upload" method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <label for="memory-title">Title</label>
+                            <input id="memory-title" name="title" type="text" maxlength="200" placeholder="e.g. Family photo archive" required>
+                            <label for="memory-document">File</label>
+                            <input id="memory-document" name="document" type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.m4a,.mp4,.mov,.webm,.xls,.xlsx" required>
+                            <small class="upload-note">Supported types: documents, PDFs, images, audio, and video.</small>
+                            <button type="submit">Save upload <span aria-hidden="true">&#8594;</span></button>
+                        </form>
+                    </section>
+
+                </div>
+
+                {% elif page == 'upload-configure' %}
+                <div class="page-heading">
+                    <p class="eyebrow">WORKSPACE / CONFIGURE</p>
+                    <h1>Document details</h1>
+                    <p>Set the context and audience for this uploaded file.</p>
+                </div>
+                {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
+                {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
+
+                <div class="configure-grid">
+                    <section class="content-panel configure-panel">
+                        <div class="section-heading"><div><p class="eyebrow">ACTIVE FILE</p><h2>{{ document.title }}</h2></div><span class="panel-index">01</span></div>
+                        <form class="configure-form" id="executive-summary-form" action="/dashboard/upload/{{ document.id }}/generate" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="output_format" value="Executive Summary">
+
+                            <label for="document-context">Context</label>
+                            <select id="document-context" name="context" required>
+                                <option value="">Select context</option>
+                                {% for option in context_options %}
+                                <option value="{{ option }}" {% if document.context == option %}selected{% endif %}>{{ option|title }}</option>
+                                {% endfor %}
+                            </select>
+
+                            <label for="target-audience">Target audience</label>
+                            <input id="target-audience" name="target_audience" type="text" value="{{ document.target_audience or '' }}" placeholder="e.g. students, founders, employees" required>
+
+                            <label for="custom-outputs">Custom output ideas</label>
+                            <textarea id="custom-outputs" name="custom_outputs" rows="4" placeholder="Add any custom outputs like campaign scripts, reels, blogs, product teasers...">{{ document.custom_outputs or '' }}</textarea>
+
+                            <button id="generate-summary-button" type="submit">Generate Executive Summary <span aria-hidden="true">&#8594;</span></button>
+                            <div id="summary-download-status" class="summary-download-status" aria-live="polite"></div>
+                        </form>
+
+                        <script>
+                            const summaryForm = document.getElementById('executive-summary-form');
+                            const summaryButton = document.getElementById('generate-summary-button');
+                            const summaryStatus = document.getElementById('summary-download-status');
+
+                            if (summaryForm) {
+                                summaryForm.addEventListener('submit', async (event) => {
+                                    event.preventDefault();
+                                    const formData = new FormData(summaryForm);
+                                    const originalText = summaryButton.innerHTML;
+                                    summaryButton.disabled = true;
+                                    summaryButton.innerHTML = 'Generating PDF...';
+                                    summaryStatus.textContent = 'Creating your executive summary PDF...';
+                                    summaryStatus.classList.add('visible');
+
+                                    try {
+                                        const response = await fetch(summaryForm.action, {
+                                            method: 'POST',
+                                            body: formData,
+                                        });
+
+                                        if (!response.ok) {
+                                            const errorText = await response.text();
+                                            throw new Error(errorText || 'Could not generate the executive summary.');
+                                        }
+
+                                        const blob = await response.blob();
+                                        const url = URL.createObjectURL(blob);
+                                        const popup = window.open(url, '_blank', 'noopener,noreferrer');
+
+                                        if (!popup) {
+                                            const link = document.createElement('a');
+                                            link.href = url;
+                                            link.target = '_blank';
+                                            link.rel = 'noopener noreferrer';
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            link.remove();
+                                        }
+
+                                        summaryStatus.textContent = 'Executive summary opened successfully.';
+                                        summaryStatus.classList.add('success');
+                                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                                    } catch (error) {
+                                        summaryStatus.textContent = 'There was a problem downloading the PDF. Please try again.';
+                                        summaryStatus.classList.add('error');
+                                    } finally {
+                                        summaryButton.disabled = false;
+                                        summaryButton.innerHTML = originalText;
+                                    }
+                                });
+                            }
+                        </script>
+                    </section>
+                </div>
 
                 {% elif page == 'reports' %}
                 <div class="page-heading">
