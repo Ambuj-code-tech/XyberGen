@@ -1,1 +1,5 @@
-xybergen.sqlite3
+__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+.env
