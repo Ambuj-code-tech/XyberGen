@@ -349,6 +349,7 @@ def render_login(
     csrf_token = secrets.token_urlsafe(32)
     context["csrf_token"] = csrf_token
     response = render_template(request, "index.html", context, status_code)
+    response.headers["Cache-Control"] = "no-store"
     response.set_cookie(
         key=LOGIN_CSRF_COOKIE,
         value=csrf_token,

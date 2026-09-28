@@ -53,7 +53,7 @@
             {% endif %}
 
             {% if mode == 'setup' %}
-            <form action="/setup" method="POST" autocomplete="off">
+            <form action="/setup" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="username">Administrator username</label>
                 <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
@@ -73,27 +73,27 @@
                 <button type="submit">Create administrator <span aria-hidden="true">&#8594;</span></button>
             </form>
             {% elif mode == 'register' %}
-            <form action="/register" method="POST" autocomplete="off">
+            <form action="/register" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="username">Username</label>
                 <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
 
                 <label for="password">Password</label>
                 <div class="password-control">
-                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="off" required>
+                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="new-password" required>
                     <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
                 </div>
 
                 <label for="password-confirmation">Confirm password</label>
                 <div class="password-control">
-                    <input id="password-confirmation" type="password" name="password_confirmation" placeholder="Enter it again" minlength="12" autocomplete="off" required>
+                    <input id="password-confirmation" type="password" name="password_confirmation" placeholder="Enter it again" minlength="12" autocomplete="new-password" required>
                     <button class="password-toggle" type="button" data-password-toggle aria-controls="password-confirmation" aria-pressed="false">Show</button>
                 </div>
 
                 <button type="submit">Create viewer account <span aria-hidden="true">&#8594;</span></button>
             </form>
             {% else %}
-            <form action="/login" method="POST" autocomplete="off">
+            <form action="/login" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label for="username">Username</label>
                 <input id="username" type="text" name="username" placeholder="Enter your username" autocomplete="off" autocapitalize="none" spellcheck="false" required>
@@ -102,7 +102,7 @@
                     <label for="password">Password</label>
                 </div>
                 <div class="password-control">
-                    <input id="password" type="password" name="password" placeholder="Enter your password" autocomplete="off" required>
+                    <input id="password" type="password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
                     <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
                 </div>
 
@@ -113,6 +113,19 @@
         </section>
     </main>
     <script>
+        const clearCredentials = () => {
+            document.querySelectorAll('input[name="username"], input[type="password"]').forEach((input) => {
+                input.value = "";
+            });
+        };
+
+        window.addEventListener("pagehide", clearCredentials);
+        window.addEventListener("pageshow", (event) => {
+            if (!event.persisted) return;
+            clearCredentials();
+            window.location.reload();
+        });
+
         document.querySelectorAll("[data-password-toggle]").forEach((button) => {
             button.addEventListener("click", () => {
                 const password = document.getElementById(button.getAttribute("aria-controls"));

@@ -30,4 +30,8 @@ For HTTPS deployments, set `XYBERGEN_COOKIE_SECURE=1`. Keep it unset for local H
 | Analyst | Workspace overview and reports |
 | Admin | Overview, reports, and account creation |
 
+## Document ingestion handoff
+
+The dashboard currently contains the planned intake and verified-reports UI only. Upload controls and report filters are disabled until the ingestion and reporting services are connected. No files, document history, chats, or transformations are currently submitted or stored by this application. The planned upload contract is a `multipart/form-data` POST to `/api/documents/ingest` with `file`, `document_type`, `description`, and the session `csrf_token`; supported types are `pdf`, `scan`, `audio`, and `intercept_log`. Reports must contain only verified, rehydrated transformations. The receiving endpoint, history persistence, and downstream processing remain integration work for the other team.
+
 Passwords are stored as salted PBKDF2 hashes. Sessions use random opaque tokens stored as hashes in SQLite, expire after eight hours, and are invalidated on sign-out. Sign-in, registration, user provisioning, role changes, and sign-out use CSRF tokens.
