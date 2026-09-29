@@ -9,21 +9,10 @@ from dotenv import load_dotenv
 
 def _normalize_env() -> None:
     env_path = Path(__file__).resolve().parents[1] / ".env"
-    if env_path.exists():
-        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export "):]
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            os.environ[key.strip()] = value.strip().strip('"\'')
+    load_dotenv(env_path, override=True)
     for key in ("GROQ_API_KEY", "OPENAI_API_KEY", "XYBERGEN_MODEL"):
         if key in os.environ:
             os.environ[key] = str(os.environ[key]).strip().strip('"\'')
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 
 _normalize_env()
