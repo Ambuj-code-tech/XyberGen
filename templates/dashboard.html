@@ -178,6 +178,9 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="output_format" value="Executive Summary">
 
+                            <label for="report-title">Report title</label>
+                            <input id="report-title" name="report_title" type="text" value="{{ (document.title ~ ' Executive Summary')[:200] }}" maxlength="200" required>
+
                             <label for="document-context">Context</label>
                             <select id="document-context" name="context" required>
                                 <option value="">Select context</option>
@@ -286,7 +289,7 @@
                             {% for output in pending_outputs %}
                             <div class="pending-output-row">
                                 <span class="pending-output-mark" aria-hidden="true">&#8943;</span>
-                                <div><strong>{{ output.document_title }}</strong><span>{{ output.output_format }} · {{ output.created_at[:10] }}</span></div>
+                                <div><strong>{{ output.title }}</strong><span>{{ output.document_title }} · {{ output.output_format }} · {{ output.created_at[:10] }}</span></div>
                                 <span class="pending-output-status">Awaiting verification</span>
                             </div>
                             {% endfor %}

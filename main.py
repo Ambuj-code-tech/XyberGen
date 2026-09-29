@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterator
+from xml.sax.saxutils import escape
 
 import uvicorn
 from dotenv import load_dotenv
@@ -949,6 +950,12 @@ async def generate_document_output_for_user(document_id: int, request: Request):
     if not document_profile:
         return JSONResponse({"error": "No uploaded document found."}, status_code=404)
 
+    report_title = str(form.get("report_title", "")).strip()
+    if not report_title:
+        report_title = f"{document_profile['title']} Executive Summary".strip()[:200]
+    if len(report_title) > 200:
+        return JSONResponse({"error": "Report title must be 200 characters or less."}, status_code=400)
+
     context = str(form.get("context", "") or document_profile["context"] or "announcement").strip().lower()
     target_audience = str(form.get("target_audience", "") or document_profile["target_audience"] or "general audience").strip()
     custom_outputs = str(form.get("custom_outputs", "") or document_profile["custom_outputs"] or "").strip()
@@ -1019,11 +1026,13 @@ async def generate_document_output_for_user(document_id: int, request: Request):
         output_format,
     )
 
-    safe_title = (document_profile["title"] or "executive-summary").strip() or "executive-summary"
-    safe_title = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in safe_title).strip("-") or "executive-summary"
+    safe_title = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch in ("-", "_")) else "-"
+        for ch in report_title
+    ).strip("-") or "report"
 
     try:
-        pdf_bytes = build_summary_pdf(safe_title.replace("-", " ").title(), result)
+        pdf_bytes = build_summary_pdf(escape(report_title), result)
     except RuntimeError:
         pdf_bytes = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF"
 
@@ -1038,7 +1047,7 @@ async def generate_document_output_for_user(document_id: int, request: Request):
                     user["id"],
                     document_id,
                     output_format,
-                    safe_title.replace("-", " ").title(),
+                    report_title,
                     generated_content,
                     datetime.now(timezone.utc).isoformat(),
                 ),

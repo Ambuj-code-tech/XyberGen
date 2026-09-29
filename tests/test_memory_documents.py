@@ -105,6 +105,7 @@ class MemoryDocumentFlowTests(unittest.TestCase):
         self.assertEqual(configure_response.status_code, 200)
         self.assertIn("Context", configure_response.text)
         self.assertIn("Target audience", configure_response.text)
+        self.assertIn("Report title", configure_response.text)
         self.assertIn("Generate Executive Summary", configure_response.text)
         self.assertIn("Emergency", configure_response.text)
 
@@ -142,17 +143,19 @@ class MemoryDocumentFlowTests(unittest.TestCase):
                 "csrf_token": "csrf-memory-token",
                 "user_prompt": "Write an announcement for the campus launch.",
                 "output_format": "LinkedIn post",
+                "report_title": "Campus launch brief",
             },
             follow_redirects=False,
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("application/pdf", response.headers.get("content-type", ""))
+        self.assertIn('filename="Campus-launch-brief.pdf"', response.headers.get("content-disposition", ""))
         self.assertTrue(response.content.startswith(b"%PDF"))
         self.assertIn(b"campus", response.content.lower())
 
         text = response.content.decode("latin-1", errors="ignore")
-        self.assertIn("Campus", text)
+        self.assertIn("Campus launch brief", text)
         self.assertNotIn("Requested brief:", text)
         self.assertNotIn("Saved output formats:", text)
         self.assertIn("Key", text)
@@ -162,13 +165,13 @@ class MemoryDocumentFlowTests(unittest.TestCase):
 
         with sqlite3.connect(main.DATABASE_PATH) as connection:
             saved_output = connection.execute(
-                "SELECT output_format, content, is_verified, is_rehydrated FROM generated_outputs WHERE document_id = ?",
+                "SELECT title, output_format, content, is_verified, is_rehydrated FROM generated_outputs WHERE document_id = ?",
                 (document_id,),
             ).fetchone()
         self.assertIsNotNone(saved_output)
-        self.assertEqual(saved_output[0], "LinkedIn post")
-        self.assertTrue(saved_output[1])
-        self.assertEqual(saved_output[2:], (0, 0))
+        self.assertEqual(saved_output[:2], ("Campus launch brief", "LinkedIn post"))
+        self.assertTrue(saved_output[2])
+        self.assertEqual(saved_output[3:], (0, 0))
 
     def test_reports_show_pending_status_but_hide_generated_content(self):
         with sqlite3.connect(main.DATABASE_PATH) as connection:
