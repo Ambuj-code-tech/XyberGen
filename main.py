@@ -22,21 +22,10 @@ BASE_DIR = Path(__file__).resolve().parent
 
 def load_environment() -> None:
     env_path = BASE_DIR / ".env"
-    if env_path.exists():
-        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export "):]
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            os.environ[key.strip()] = value.strip().strip('"\'')
+    load_dotenv(env_path, override=True)
     for key in ("GROQ_API_KEY", "OPENAI_API_KEY", "XYBERGEN_MODEL", "XYBERGEN_ADMIN_USERNAME", "XYBERGEN_ADMIN_PASSWORD"):
         if key in os.environ:
             os.environ[key] = str(os.environ[key]).strip().strip('"\'')
-    load_dotenv(env_path, override=True)
 
 
 load_environment()
@@ -55,7 +44,7 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-_AGENT_PATH = BASE_DIR / "backemd." / "agent.py"
+_AGENT_PATH = BASE_DIR / "backend" / "agent.py"
 generate_document_output = None
 if _AGENT_PATH.exists():
     spec = importlib.util.spec_from_file_location("xybergen_agent", _AGENT_PATH)
@@ -101,6 +90,8 @@ def verify_password(password: str, encoded: str) -> bool:
 
 DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 CONTEXT_OPTIONS = ["emergency", "announcement", "casual"]
+DOCUMENT_TYPE_OPTIONS = {"document", "scan", "audio", "video"}
+REPORT_CATEGORIES = ("Infographics", "X Posts", "Storyboards")
 OUTPUT_FORMAT_OPTIONS = [
     "LinkedIn post",
     "X post",
@@ -168,6 +159,8 @@ def initialize_database() -> None:
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 title TEXT NOT NULL,
                 original_name TEXT NOT NULL,
+                document_type TEXT NOT NULL DEFAULT 'document',
+                description TEXT NOT NULL DEFAULT '',
                 mime_type TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL,
                 file_data BLOB NOT NULL,
@@ -197,6 +190,28 @@ def initialize_database() -> None:
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 title TEXT NOT NULL,
                 content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS verified_reports (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                document_id INTEGER NOT NULL REFERENCES uploaded_documents(id) ON DELETE CASCADE,
+                category TEXT NOT NULL CHECK(category IN ('Infographics', 'X Posts', 'Storyboards')),
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_verified INTEGER NOT NULL DEFAULT 0 CHECK(is_verified IN (0, 1)),
+                is_rehydrated INTEGER NOT NULL DEFAULT 0 CHECK(is_rehydrated IN (0, 1)),
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS generated_outputs (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                document_id INTEGER NOT NULL REFERENCES uploaded_documents(id) ON DELETE CASCADE,
+                output_format TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_verified INTEGER NOT NULL DEFAULT 0 CHECK(is_verified IN (0, 1)),
+                is_rehydrated INTEGER NOT NULL DEFAULT 0 CHECK(is_rehydrated IN (0, 1)),
                 created_at TEXT NOT NULL
             );
             """
@@ -233,6 +248,11 @@ initialize_database()
 
 def ensure_document_output_schema() -> None:
     with get_connection() as connection:
+        document_columns = [row[1] for row in connection.execute("PRAGMA table_info(uploaded_documents)").fetchall()]
+        if "document_type" not in document_columns:
+            connection.execute("ALTER TABLE uploaded_documents ADD COLUMN document_type TEXT NOT NULL DEFAULT 'document'")
+        if "description" not in document_columns:
+            connection.execute("ALTER TABLE uploaded_documents ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         columns = [row[1] for row in connection.execute("PRAGMA table_info(document_output_options)").fetchall()]
         if "context" not in columns:
             connection.execute("ALTER TABLE document_output_options ADD COLUMN context TEXT")
@@ -387,7 +407,8 @@ def user_context(request: Request, user: sqlite3.Row) -> dict[str, Any]:
 def get_uploaded_documents(user_id: int, limit: int = 10) -> list[sqlite3.Row]:
     with get_connection() as connection:
         return connection.execute(
-            """SELECT d.id, d.title, d.original_name, d.mime_type, d.size_bytes, d.created_at,
+            """SELECT d.id, d.title, d.original_name, d.document_type, d.description,
+                      d.mime_type, d.size_bytes, d.created_at,
                       o.context, o.target_audience, o.output_formats, o.custom_outputs,
                       o.output_format_1, o.output_format_2, o.output_format_3, o.output_format_4,
                       o.custom_output_1, o.custom_output_2, o.custom_output_3, o.custom_output_4
@@ -395,6 +416,49 @@ def get_uploaded_documents(user_id: int, limit: int = 10) -> list[sqlite3.Row]:
                LEFT JOIN document_output_options o ON o.document_id = d.id AND o.user_id = d.user_id
                WHERE d.user_id = ?
                ORDER BY d.created_at DESC, d.id DESC
+               LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+
+
+def get_verified_reports(
+    user_id: int,
+    category: str = "all",
+    query: str = "",
+) -> list[dict[str, Any]]:
+    conditions = ["r.user_id = ?", "r.is_verified = 1", "r.is_rehydrated = 1"]
+    parameters: list[Any] = [user_id]
+    if category in REPORT_CATEGORIES:
+        conditions.append("r.category = ?")
+        parameters.append(category)
+    if query:
+        conditions.append("(r.title LIKE ? OR d.title LIKE ? OR d.original_name LIKE ?)")
+        search = f"%{query}%"
+        parameters.extend((search, search, search))
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""SELECT r.id, r.document_id, r.category, r.title, r.content, r.created_at,
+                       d.title AS document_title, d.original_name
+                FROM verified_reports r
+                JOIN uploaded_documents d ON d.id = r.document_id AND d.user_id = r.user_id
+                WHERE {' AND '.join(conditions)}
+                ORDER BY d.created_at DESC, r.created_at DESC, r.id DESC
+                LIMIT 200""",
+            parameters,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_pending_outputs(user_id: int, limit: int = 100) -> list[sqlite3.Row]:
+    with get_connection() as connection:
+        return connection.execute(
+            """SELECT o.id, o.document_id, o.output_format, o.title, o.created_at,
+                      d.title AS document_title
+               FROM generated_outputs o
+               JOIN uploaded_documents d ON d.id = o.document_id AND d.user_id = o.user_id
+               WHERE o.user_id = ? AND (o.is_verified = 0 OR o.is_rehydrated = 0)
+               ORDER BY o.created_at DESC, o.id DESC
                LIMIT ?""",
             (user_id, limit),
         ).fetchall()
@@ -648,7 +712,12 @@ async def dashboard(request: Request):
     if not user_has_permission(user["id"], "dashboard:view"):
         return HTMLResponse("You do not have permission to view this page.", status_code=403)
     context = user_context(request, user)
-    context["page"] = "dashboard"
+    context.update({
+        "page": "dashboard",
+        "uploaded_documents": get_uploaded_documents(user["id"]),
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
     return render_template(request, "dashboard.html", context)
 
 
@@ -689,21 +758,36 @@ async def save_uploaded_document(request: Request):
         return HTMLResponse("Invalid request token.", status_code=403)
 
     title = str(form.get("title", "")).strip()
+    document_type = str(form.get("document_type", "")).strip().lower()
+    description = str(form.get("description", "")).strip()
     uploaded_file = form.get("document")
-    if not title:
-        return RedirectResponse("/dashboard/upload?error=Add+a+title+for+your+upload", status_code=303)
     if len(title) > 200:
         return RedirectResponse("/dashboard/upload?error=Title+must+be+200+characters+or+less", status_code=303)
+    if len(description) > 1000:
+        return RedirectResponse("/dashboard/upload?error=Description+must+be+1000+characters+or+less", status_code=303)
     if uploaded_file is None or getattr(uploaded_file, "filename", "") == "":
         return RedirectResponse("/dashboard/upload?error=Choose+a+supported+document,+image,+audio+or+video+file", status_code=303)
 
     filename = str(getattr(uploaded_file, "filename", "")).strip()
     mime_type = str(getattr(uploaded_file, "content_type", "") or "application/octet-stream").strip().lower()
+    if not title:
+        title = Path(filename).stem[:200] or filename[:200]
+    if not document_type:
+        if mime_type.startswith("audio/"):
+            document_type = "audio"
+        elif mime_type.startswith("video/"):
+            document_type = "video"
+        elif mime_type.startswith("image/"):
+            document_type = "scan"
+        else:
+            document_type = "document"
+    if document_type not in DOCUMENT_TYPE_OPTIONS:
+        return RedirectResponse("/dashboard/upload?error=Choose+a+valid+document+type", status_code=303)
     file_data = await uploaded_file.read()
     if not filename:
         return RedirectResponse("/dashboard/upload?error=Choose+a+supported+document,+image,+audio+or+video+file", status_code=303)
     if mime_type not in ALLOWED_UPLOAD_MIME_TYPES and not filename.lower().endswith(
-        (".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp3", ".wav", ".m4a", ".mp4", ".mov", ".webm")
+        (".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp3", ".wav", ".m4a", ".mp4", ".mov", ".webm", ".xls", ".xlsx")
     ):
         return RedirectResponse("/dashboard/upload?error=Only+docs,+PDF,+images,+audio,+and+video+files+are+allowed", status_code=303)
     if not file_data:
@@ -711,12 +795,42 @@ async def save_uploaded_document(request: Request):
 
     with get_connection() as connection:
         cursor = connection.execute(
-            """INSERT INTO uploaded_documents (user_id, title, original_name, mime_type, size_bytes, file_data, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (user["id"], title, filename, mime_type, len(file_data), file_data, datetime.now(timezone.utc).isoformat()),
+            """INSERT INTO uploaded_documents (
+                   user_id, title, original_name, document_type, description, mime_type,
+                   size_bytes, file_data, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                user["id"], title, filename, document_type, description, mime_type,
+                len(file_data), file_data, datetime.now(timezone.utc).isoformat(),
+            ),
         )
         document_id = cursor.lastrowid
+    if str(form.get("source", "")) == "overview":
+        return RedirectResponse("/dashboard?success=Document+saved+to+your+submission+history", status_code=303)
     return RedirectResponse(f"/dashboard/upload/{document_id}/configure?success=Upload+saved", status_code=303)
+
+
+@app.post("/dashboard/upload/{document_id}/delete")
+async def delete_uploaded_document(document_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_has_permission(user["id"], "dashboard:view"):
+        return HTMLResponse("You do not have permission to delete this document.", status_code=403)
+
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    with get_connection() as connection:
+        cursor = connection.execute(
+            "DELETE FROM uploaded_documents WHERE id = ? AND user_id = ?",
+            (document_id, user["id"]),
+        )
+    if cursor.rowcount == 0:
+        return RedirectResponse("/dashboard?error=Document+not+found", status_code=303)
+    return RedirectResponse("/dashboard?success=Document+deleted", status_code=303)
 
 
 @app.get("/dashboard/upload/{document_id}/configure", response_class=HTMLResponse)
@@ -913,6 +1027,23 @@ async def generate_document_output_for_user(document_id: int, request: Request):
     except RuntimeError:
         pdf_bytes = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF"
 
+    generated_content = str(result or "").strip()
+    if generated_content:
+        with get_connection() as connection:
+            connection.execute(
+                """INSERT INTO generated_outputs (
+                       user_id, document_id, output_format, title, content, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    user["id"],
+                    document_id,
+                    output_format,
+                    safe_title.replace("-", " ").title(),
+                    generated_content,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -942,7 +1073,29 @@ async def reports(request: Request):
     if not user_has_permission(user["id"], "reports:view"):
         return HTMLResponse("Your account does not have report access.", status_code=403)
     context = user_context(request, user)
-    context["page"] = "reports"
+    category = request.query_params.get("category", "all")
+    if category not in (*REPORT_CATEGORIES, "all"):
+        category = "all"
+    query = request.query_params.get("q", "").strip()[:100]
+    reports = get_verified_reports(user["id"], category, query)
+    pending_outputs = get_pending_outputs(user["id"])
+    grouped_reports: dict[int, dict[str, Any]] = {}
+    for report in reports:
+        group = grouped_reports.setdefault(report["document_id"], {
+            "title": report["document_title"],
+            "original_name": report["original_name"],
+            "outputs": [],
+        })
+        group["outputs"].append(report)
+    context.update({
+        "page": "reports",
+        "report_categories": REPORT_CATEGORIES,
+        "report_category": category,
+        "report_query": query,
+        "report_documents": list(grouped_reports.values()),
+        "report_count": len(reports),
+        "pending_outputs": pending_outputs,
+    })
     return render_template(request, "dashboard.html", context)
 
 

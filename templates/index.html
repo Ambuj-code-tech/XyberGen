@@ -52,15 +52,15 @@
             <p class="auth-message setup-message" role="status">First, create the administrator account. Public registration opens after setup and always assigns the viewer role.</p>
             {% endif %}
 
-            {% if mode == 'setup' %}
-            <form action="/setup" method="POST">
+            {% if mode in ['setup', 'register'] %}
+            <form action="{{ '/setup' if mode == 'setup' else '/register' }}" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <label for="username">Administrator username</label>
+                <label for="username">{{ 'Administrator username' if mode == 'setup' else 'Username' }}</label>
                 <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
 
                 <label for="password">Password</label>
                 <div class="password-control">
-                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="off" required>
+                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="{{ 'off' if mode == 'setup' else 'new-password' }}" required>
                     <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
                 </div>
 
@@ -70,27 +70,7 @@
                     <button class="password-toggle" type="button" data-password-toggle aria-controls="password-confirmation" aria-pressed="false">Show</button>
                 </div>
 
-                <button type="submit">Create administrator <span aria-hidden="true">&#8594;</span></button>
-            </form>
-            {% elif mode == 'register' %}
-            <form action="/register" method="POST">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <label for="username">Username</label>
-                <input id="username" type="text" name="username" placeholder="Choose a username" minlength="3" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
-
-                <label for="password">Password</label>
-                <div class="password-control">
-                    <input id="password" type="password" name="password" placeholder="At least 12 characters" minlength="12" autocomplete="new-password" required>
-                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false">Show</button>
-                </div>
-
-                <label for="password-confirmation">Confirm password</label>
-                <div class="password-control">
-                    <input id="password-confirmation" type="password" name="password_confirmation" placeholder="Enter it again" minlength="12" autocomplete="new-password" required>
-                    <button class="password-toggle" type="button" data-password-toggle aria-controls="password-confirmation" aria-pressed="false">Show</button>
-                </div>
-
-                <button type="submit">Create viewer account <span aria-hidden="true">&#8594;</span></button>
+                <button type="submit">{{ 'Create administrator' if mode == 'setup' else 'Create viewer account' }} <span aria-hidden="true">&#8594;</span></button>
             </form>
             {% else %}
             <form action="/login" method="POST">
