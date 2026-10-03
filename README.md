@@ -25,7 +25,7 @@ The current repository contains the initial working application and focuses on t
 4. **Document, scan, audio, and video intake**
 5. **Submission history and report management**
 6. **Generated-output tracking**
-7. **SQLite-based persistence**
+7. **SQLite-based persistence**    > ** May got changed to PostgreSQL **
 8. **Hashed session tokens and session expiry**
 9. **CSRF protection** for authentication and account-management operations
 
