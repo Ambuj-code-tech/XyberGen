@@ -15,25 +15,22 @@ This creates a need for a content transformation system that can operate within 
 
 XyberGen follows a phased architecture: Input → Secure Processing → AI Transformation → Validation → Output
 
-The system is being developed progressively, starting with a functional web application for managing users, submissions, documents, and generated outputs. Future phases introduce local LLM inference, PII protection, entity vaulting, validation, and a production-oriented secure deployment architecture.
-
-Development Phases
 ## Phase 1 — Current Implementation
 
 The current repository contains the initial working application and focuses on the core platform and workflow:
 
-FastAPI-based web application
-Role-based access: Admin, Analyst, Viewer
-User registration and role management
-Document, scan, audio, and video intake
-Submission history and report management
-Generated-output tracking
-SQLite-based persistence
-PBKDF2 password hashing
-Hashed session tokens and session expiry
-CSRF protection for authentication/account-management operations
+1. **FastAPI-based web application**
+2. **Role-based access:** Admin, Analyst, Viewer
+3. **User registration and role management**
+4. **Document, scan, audio, and video intake**
+5. **Submission history and report management**
+6. **Generated-output tracking**
+7. **SQLite-based persistence**
+8. **PBKDF2 password hashing**
+9. **Hashed session tokens and session expiry**
+10. **CSRF protection** for authentication and account-management operations
 
-Note: Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
+> **Note:** Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
 
 ## Phase 2 — Planned Enhancements
 Improved LLM-based executive summaries
