@@ -32,7 +32,7 @@ The current repository contains the initial working application and focuses on t
 
 > **Note:** Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
 
-## Phase 2 — Planned Enhancements
+## Phase 2 — Ongoing Enhancements
 
 1. **Improved LLM-based executive summaries**
 2. **Additional content-output formats**
