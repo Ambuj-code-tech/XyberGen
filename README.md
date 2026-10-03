@@ -1,8 +1,8 @@
-XyberGen
+# XyberGen
 
 XyberGen is a secure AI-powered content transformation platform designed for handling sensitive information in controlled environments. It aims to transform documents and other inputs into structured, usable communication outputs while progressively adding security, local AI, validation, and deployment controls.
 
-Problem Statement
+# Problem Statement
 
 Organizations handling sensitive information often face two challenges:
 
@@ -20,7 +20,7 @@ Input → Secure Processing → AI Transformation → Validation → Output
 The system is being developed progressively, starting with a functional web application for managing users, submissions, documents, and generated outputs. Future phases introduce local LLM inference, PII protection, entity vaulting, validation, and a production-oriented secure deployment architecture.
 
 Development Phases
-Phase 1 — Current Implementation
+## Phase 1 — Current Implementation
 
 The current repository contains the initial working application and focuses on the core platform and workflow:
 
@@ -37,7 +37,7 @@ CSRF protection for authentication/account-management operations
 
 Note: Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
 
-Phase 2 — Planned Enhancements
+## Phase 2 — Planned Enhancements
 Improved LLM-based executive summaries
 Additional content-output formats
 Admin deregistration with at least one admin preserved
