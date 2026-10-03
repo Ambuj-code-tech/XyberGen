@@ -6,16 +6,14 @@ XyberGen is a secure AI-powered content transformation platform designed for han
 
 Organizations handling sensitive information often face two challenges:
 
-Processing large documents and converting them into multiple communication formats is time- and resource-intensive.
-Sensitive data cannot always be sent to external or cloud-based AI services due to security and confidentiality requirements.
+1. Processing large documents and converting them into multiple communication formats is time- and resource-intensive.
+2. Sensitive data cannot always be sent to external or cloud-based AI services due to security and confidentiality requirements.
 
 This creates a need for a content transformation system that can operate within a controlled environment while maintaining security and traceability.
 
-XyberGen — Solution Approach
+## XyberGen — Solution Approach
 
-XyberGen follows a phased architecture:
-
-Input → Secure Processing → AI Transformation → Validation → Output
+XyberGen follows a phased architecture: Input → Secure Processing → AI Transformation → Validation → Output
 
 The system is being developed progressively, starting with a functional web application for managing users, submissions, documents, and generated outputs. Future phases introduce local LLM inference, PII protection, entity vaulting, validation, and a production-oriented secure deployment architecture.
 
