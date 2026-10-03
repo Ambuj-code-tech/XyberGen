@@ -33,18 +33,13 @@ The current repository contains the initial working application and focuses on t
 > **Note:** Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
 
 ## Phase 2 — Planned Enhancements
-Improved LLM-based executive summaries
-Additional content-output formats
-Admin deregistration with at least one admin preserved
-Restrict uploads to Analyst/Admin roles
-PII masking and local Redis-based entity vault
-Controlled re-identification
-JSON/schema validation
-Local LLM integration
-Optional Web Application Firewall
-Phase 3 — Production Architecture
-Multi-client deployment with a centralized server
-DDoS protection
-Data-diode simulation at defined system boundaries
-Restricted JSON-based inter-component communication
-SHA-256 integrity hashing
+
+1. **Improved LLM-based executive summaries**
+2. **Additional content-output formats**
+3. **Admin deregistration with at least one admin preserved**
+4. **Restrict uploads to Analyst/Admin roles**
+5. **PII masking and local Redis-based entity vault**
+6. **Controlled re-identification**
+7. **JSON/schema validation**
+8. **Local LLM integration**
+9. **Optional Web Application Firewall**
