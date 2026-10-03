@@ -55,10 +55,10 @@ XyberGen — Content Transformation Workflow
         │ Audio/Video │
         └──────┬──────┘
                ↓
-        ┌─────────────┐
+        ┌──────────── ┐
         │Pre-processing│
-        │ Validation  │
-        │   & Format  │
+        │ Validation   │
+        │   & Format   │
         └──────┬──────┘
                ↓
         ┌─────────────┐
