@@ -41,9 +41,19 @@ The current repository contains the initial working application and focuses on t
 
 ## How to Run Locally
 
-### 1. Clone the Repository
-git clone https://github.com/Ambuj-code-tech/XyberGen.git
-cd XyberGen
+1. Clone the repository using `git clone https://github.com/Ambuj-code-tech/XyberGen.git`.
+2. Navigate to the project using `cd XyberGen`.
+3. Create a virtual environment using `python -m venv venv`.
+4. Activate the virtual environment:
+   - **Windows:** `venv\Scripts\activate`
+   - **Linux/macOS:** `source venv/bin/activate`
+5. Install dependencies using `pip install -r requirements.txt`.
+6. Start the FastAPI server using `uvicorn main:app --reload`.
+7. Open `http://127.0.0.1:8000` in your browser.
+
+### API Documentation
+
+Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
 
 ## Phase 2 — Ongoing Enhancements
 
