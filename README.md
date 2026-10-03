@@ -1,41 +1,55 @@
-# XyberGen
+XyberGen
 
-## Run locally
+XyberGen is a secure AI-powered content transformation platform designed for handling sensitive information in controlled environments. It aims to transform documents and other inputs into structured, usable communication outputs while progressively adding security, local AI, validation, and deployment controls.
 
-Install the dependencies:
+Problem Statement
 
-```powershell
-python -m pip install -r requirements.txt
-```
+Organizations handling sensitive information often face two challenges:
 
-Start the app:
+Processing large documents and converting them into multiple communication formats is time- and resource-intensive.
+Sensitive data cannot always be sent to external or cloud-based AI services due to security and confidentiality requirements.
 
-```powershell
-python main.py
-```
+This creates a need for a content transformation system that can operate within a controlled environment while maintaining security and traceability.
 
-On a fresh database, open `http://127.0.0.1:8000/` and create the first administrator. This setup is available only while there is no active administrator. The app stores data in `xybergen.sqlite3` beside `main.py` by default.
+XyberGen — Solution Approach
 
-After setup, users can register at `/register`. Every self-registered account is assigned the `viewer` role. Administrators can promote or demote accounts from **User access**; only administrators can access that control. The application prevents demoting the last active administrator. Admin-created accounts also start as viewers.
+XyberGen follows a phased architecture:
 
-For automated or managed deployments, the first administrator can optionally be bootstrapped before startup using `XYBERGEN_ADMIN_USERNAME` and `XYBERGEN_ADMIN_PASSWORD`. The password must be at least 12 characters, and both variables must be set together.
+Input → Secure Processing → AI Transformation → Validation → Output
 
-For HTTPS deployments, set `XYBERGEN_COOKIE_SECURE=1`. Keep it unset for local HTTP development. Store the database on persistent storage and restrict access to it; it contains password hashes and active session records.
+The system is being developed progressively, starting with a functional web application for managing users, submissions, documents, and generated outputs. Future phases introduce local LLM inference, PII protection, entity vaulting, validation, and a production-oriented secure deployment architecture.
 
-## Roles
+Development Phases
+Phase 1 — Current Implementation
 
-| Role | Permissions |
-| --- | --- |
-| Viewer | Workspace overview |
-| Analyst | Workspace overview and reports |
-| Admin | Overview, reports, and account creation |
+The current repository contains the initial working application and focuses on the core platform and workflow:
 
-## Document intake and reports
+FastAPI-based web application
+Role-based access: Admin, Analyst, Viewer
+User registration and role management
+Document, scan, audio, and video intake
+Submission history and report management
+Generated-output tracking
+SQLite-based persistence
+PBKDF2 password hashing
+Hashed session tokens and session expiry
+CSRF protection for authentication/account-management operations
 
-The Overview page accepts documents, scans, audio, and video with optional descriptions. Uploads and their metadata are stored in SQLite per user and appear in the submission history; the Overview never displays generated output. The current upload flow stores source files but does not run masking or a data-diode pipeline. That processing still requires the ingestion service.
+Note: Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
 
-Reports groups published outputs by source document and supports category and text filters. It displays only rows marked both verified and rehydrated in `verified_reports`. Generated summaries are saved per user and document in `generated_outputs` with verification and rehydration disabled by default. Reports shows their source, format, date, and pending status, but never their generated text until those checks are complete. No verification or rehydration service currently promotes these outputs into `verified_reports`.
-
-The application does not currently have a chat/conversation feature or chat-history storage. Chat retention must be added with that workflow; it should not be inferred from document upload history.
-
-Passwords are stored as salted PBKDF2 hashes. Sessions use random opaque tokens stored as hashes in SQLite, expire after eight hours, and are invalidated on sign-out. Sign-in, registration, user provisioning, role changes, and sign-out use CSRF tokens.
+Phase 2 — Planned Enhancements
+Improved LLM-based executive summaries
+Additional content-output formats
+Admin deregistration with at least one admin preserved
+Restrict uploads to Analyst/Admin roles
+PII masking and local Redis-based entity vault
+Controlled re-identification
+JSON/schema validation
+Local LLM integration
+Optional Web Application Firewall
+Phase 3 — Production Architecture
+Multi-client deployment with a centralized server
+DDoS protection
+Data-diode simulation at defined system boundaries
+Restricted JSON-based inter-component communication
+SHA-256 integrity hashing
