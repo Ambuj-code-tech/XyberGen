@@ -36,10 +36,10 @@ XyberGen follows a phased architecture: Input → Secure Processing → AI Trans
               │    │                 │       │
               │  User 1            User 2    │
               │  Browser            Browser  │
-              │    │                 │       │
-              └────┼─────────────────┼───────┘
-                   │                 │
-                   └──── NO INTERNET┘
+              │    │                     │   │
+              └────┼─────────────────────┼───┘
+                   │                     │
+                   └─ NO PUBLIC INTERNET ┘
 
 ## Phase 1 — Current Implementation
 
