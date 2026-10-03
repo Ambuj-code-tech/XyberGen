@@ -15,6 +15,32 @@ This creates a need for a content transformation system that can operate within 
 
 XyberGen follows a phased architecture: Input → Secure Processing → AI Transformation → Validation → Output
 
+## How Xybergen would work in the real deployment
+
+                    AIR-GAPPED ENVIRONMENT
+              ┌──────────────────────────────┐
+              │                              │
+              │   ┌────────────────────┐     │
+              │   │ Xybergen Server    │     │
+              │   │                    │     │
+              │   │ FastAPI            │     │
+              │   │ Local LLM          │     │
+              │   │ RAG + Qdrant       │     │
+              │   │ Database           │     │
+              │   │ Security Layer     │     │
+              │   └─────────┬──────────┘     │
+              │             │                │
+              │       Private LAN            │
+              │             │                │
+              │    ┌────────┴────────┐       │
+              │    │                 │       │
+              │  User 1            User 2    │
+              │  Browser            Browser  │
+              │    │                 │       │
+              └────┼─────────────────┼───────┘
+                   │                 │
+                   └──── NO INTERNET┘
+
 ## Phase 1 — Current Implementation
 
 The current repository contains the initial working application and focuses on the core platform and workflow:
