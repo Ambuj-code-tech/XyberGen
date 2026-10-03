@@ -43,3 +43,55 @@ The current repository contains the initial working application and focuses on t
 7. **JSON/schema validation**
 8. **Local LLM integration**
 9. **Optional Web Application Firewall**
+
+                        XyberGen — Content Transformation Workflow
+
+┌──────────────┐
+│    INPUT     │
+│ Documents    │
+│ Scans        │
+│ Audio / Video│
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────┐
+│  Pre-processing  │
+│ Validation       │
+│ Format Handling  │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│   PII Masking    │
+│ Detect & Mask    │
+│ Sensitive Data   │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Retrieval / RAG  │
+│ Embeddings       │
+│ Context Retrieval│
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│    Local LLM     │
+│ Analyze & Generate│
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│    Validation    │
+│ JSON / Schema    │
+│ Output Checks    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│     Output       │
+│ Summary          │
+│ Reports          │
+│ Posts / Other    │
+│ Formats          │
+└──────────────────┘
