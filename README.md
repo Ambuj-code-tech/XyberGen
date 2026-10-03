@@ -59,12 +59,12 @@ XyberGen — Content Transformation Workflow
         │ Audio/Video │
         └──────┬──────┘
                ↓
-        ┌────────── ──  ┐
-        │ Pre-processing│
-        │   Validation  │
-        │   & Format    │
-        └──────┬─────  ─┘
-               ↓
+        ┌─ ─── ── ── ── ──  ┐
+        │  Pre-processing   │
+        │    Validation     │
+        │     & Format      │
+        └── ── ──┬─ ── ──  ─┘
+                ↓
         ┌─────────────┐
         │ PII Masking │
         │ & Protection│
