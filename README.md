@@ -44,8 +44,6 @@ The current repository contains the initial working application and focuses on t
 8. **Local LLM integration**
 9. **Optional Web Application Firewall**
 
-                        XyberGen — Content Transformation Workflow
-
 XyberGen — Content Transformation Workflow
 
         ┌─────────────┐
@@ -87,3 +85,18 @@ XyberGen — Content Transformation Workflow
         │ Summaries   │
         │ Multi-format│
         └─────────────┘
+## Phase 3 — Production & Security Hardening
+
+1. **Multi-client deployment with a centralized server**
+2. **Data-diode integration** at defined system boundaries
+3. **Restricted JSON-based communication** across diode-controlled interfaces
+4. **SHA-256 hashing** for data integrity verification
+5. **DDoS protection** for production deployment
+6. **Production-level security testing**
+7. **Penetration testing and vulnerability assessment**
+8. **End-to-end security validation** of authentication, authorization, and data flow
+9. **Performance and scalability testing** for multiple concurrent clients
+10. **Production monitoring and audit logging**
+11. **Secure deployment hardening** across the complete application and infrastructure
+
+> **Goal:** Evolve XyberGen from an MVP into a production-ready, secure, scalable, and controlled platform for sensitive environments.
