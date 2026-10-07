@@ -15,31 +15,47 @@ This creates a need for a content transformation system that can operate within 
 
 XyberGen follows a phased architecture: Input → Secure Processing → AI Transformation → Validation → Output
 
+<img width="1235" height="695" alt="image" src="https://github.com/user-attachments/assets/ba1586fa-0a7e-41de-be9d-b6b17d7d067d" />
+
+
 ## How Xybergen would work in the real deployment
 
-                    AIR-GAPPED ENVIRONMENT
+UNTRUSTED EXTERNAL ZONE
+              (Users may have Internet Access)
               ┌──────────────────────────────┐
+              │                              │
+              │   ┌─────────┐    ┌─────────┐ │
+              │   │ User 1  │    │ User 2  │ │
+              │   │ Browser │    │ Browser │ │
+              │   └────┬────┘    └────┬────┘ │
+              └────────┼──────────────┼──────┘
+                       │              │
+  ======================================================
+      SECURE DMZ: ONE-WAY DATA DIODE & WAF / RBAC
+  ======================================================
+                       │              │ 
+                       ▼              ▼ (Strict JSON Flow)
+              ┌──────────────────────────────┐
+              │    SECURE AIR-GAPPED ZONE    │
               │                              │
               │   ┌────────────────────┐     │
               │   │ Xybergen Server    │     │
               │   │                    │     │
-              │   │ FastAPI            │     │
+              │   │ FastAPI Core       │     │
               │   │ Local LLM          │     │
               │   │ RAG + Qdrant       │     │
-              │   │ Database           │     │
-              │   │ Security Layer     │     │
-              │   └─────────┬──────────┘     │
-              │             │                │
-              │       Private LAN            │
-              │             │                │
-              │    ┌────────┴────────┐       │
-              │    │                 │       │
-              │  User 1            User 2    │
-              │  Browser            Browser  │
-              │    │                     │   │
-              └────┼─────────────────────┼───┘
-                   │                     │
-                   └─ NO PUBLIC INTERNET ┘
+              │   │ SQLite Database    │     │
+              │   └────────────────────┘     │
+              │                              │
+              │ (100% NO PUBLIC INTERNET)    │
+              └──────────────────────────────┘
+
+
+---
+## ✨ Key Features & Development Roadmap
+
+XyberGen is being developed in strategic phases to ensure structural integrity and security at every layer.
+
 
 ## Phase 1 — Current Implementation
 
@@ -149,5 +165,16 @@ XyberGen — Content Transformation Workflow
 9. **Performance and scalability testing** for multiple concurrent clients
 10. **Production monitoring and audit logging**
 11. **Secure deployment hardening** across the complete application and infrastructure
+
+---
+## 🛠️ Technology Stack
+
+* **Backend Framework:** FastAPI, Python
+* **Data Storage:** SQLite, Local Redis Cache (Entity Vaulting), Qdrant Vector DB (Local Knowledge Base)
+* **Message Broker:** RabbitMQ (Secure high-speed staging)
+* **Frontend/Templating:** HTML/CSS, Jinja2
+* **Security & Auth:** Keycloak (RBAC), Custom SHA-256 Hashing Pipelines
+
+---
 
 > **Goal:** Evolve XyberGen from an MVP into a production-ready, secure, scalable, and controlled platform for sensitive environments.
