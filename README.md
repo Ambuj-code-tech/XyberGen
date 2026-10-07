@@ -53,7 +53,10 @@ UNTRUSTED EXTERNAL ZONE
               └──────────────────────────────┘
 
 
+```
+
 ---
+
 ## ✨ Key Features & Development Roadmap
 
 XyberGen is being developed in strategic phases to ensure structural integrity and security at every layer.
