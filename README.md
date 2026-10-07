@@ -20,6 +20,8 @@ XyberGen follows a phased architecture: Input → Secure Processing → AI Trans
 
 ## How Xybergen would work in the real deployment
 
+```text
+
 UNTRUSTED EXTERNAL ZONE
               (Users may have Internet Access)
               ┌──────────────────────────────┐
