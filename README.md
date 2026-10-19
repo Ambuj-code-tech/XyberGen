@@ -57,7 +57,7 @@ UNTRUSTED EXTERNAL ZONE
 
 ---
 
-## ✨ Key Features & Development Roadmap
+## Key Features & Development Roadmap
 
 XyberGen is being developed in strategic phases to ensure structural integrity and security at every layer.
 
@@ -172,7 +172,7 @@ XyberGen — Content Transformation Workflow
 11. **Secure deployment hardening** across the complete application and infrastructure
 
 ---
-## 🛠️ Technology Stack
+## Technology Stack
 
 * **Backend Framework:** FastAPI, Python
 * **Data Storage:** SQLite, Local Redis Cache (Entity Vaulting), Qdrant Vector DB (Local Knowledge Base)
