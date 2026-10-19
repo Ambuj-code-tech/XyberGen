@@ -1,41 +1,185 @@
 # XyberGen
 
-## Run locally
+XyberGen is a secure AI-powered content transformation platform designed for handling sensitive information in controlled environments. It aims to transform documents and other inputs into structured, usable communication outputs while progressively adding security, local AI, validation, and deployment controls.
 
-Install the dependencies:
+# Problem Statement
 
-```powershell
-python -m pip install -r requirements.txt
+Organizations handling sensitive information often face two challenges:
+
+1. Processing large documents and converting them into multiple communication formats is time- and resource-intensive.
+2. Sensitive data cannot always be sent to external or cloud-based AI services due to security and confidentiality requirements.
+
+This creates a need for a content transformation system that can operate within a controlled environment while maintaining security and traceability.
+
+## XyberGen — Solution Approach
+
+XyberGen follows a phased architecture: Input → Secure Processing → AI Transformation → Validation → Output
+
+<img width="1235" height="695" alt="image" src="https://github.com/user-attachments/assets/ba1586fa-0a7e-41de-be9d-b6b17d7d067d" />
+
+
+## How Xybergen would work in the real deployment
+
+```text
+
+UNTRUSTED EXTERNAL ZONE
+              (Users may have Internet Access)
+              ┌──────────────────────────────┐
+              │                              │
+              │   ┌─────────┐    ┌─────────┐ │
+              │   │ User 1  │    │ User 2  │ │
+              │   │ Browser │    │ Browser │ │
+              │   └────┬────┘    └────┬────┘ │
+              └────────┼──────────────┼──────┘
+                       │              │
+  ======================================================
+      SECURE DMZ: ONE-WAY DATA DIODE & WAF / RBAC
+  ======================================================
+                       │              │ 
+                       ▼              ▼ (Strict JSON Flow)
+              ┌──────────────────────────────┐
+              │    SECURE AIR-GAPPED ZONE    │
+              │                              │
+              │   ┌────────────────────┐     │
+              │   │ Xybergen Server    │     │
+              │   │                    │     │
+              │   │ FastAPI Core       │     │
+              │   │ Local LLM          │     │
+              │   │ RAG + Qdrant       │     │
+              │   │ SQLite Database    │     │
+              │   └────────────────────┘     │
+              │                              │
+              │ (100% NO PUBLIC INTERNET)    │
+              └──────────────────────────────┘
+
+
 ```
 
-Start the app:
+---
 
-```powershell
-python main.py
-```
+## ✨ Key Features & Development Roadmap
 
-On a fresh database, open `http://127.0.0.1:8000/` and create the first administrator. This setup is available only while there is no active administrator. The app stores data in `xybergen.sqlite3` beside `main.py` by default.
+XyberGen is being developed in strategic phases to ensure structural integrity and security at every layer.
 
-After setup, users can register at `/register`. Every self-registered account is assigned the `viewer` role. Administrators can promote or demote accounts from **User access**; only administrators can access that control. The application prevents demoting the last active administrator. Admin-created accounts also start as viewers.
 
-For automated or managed deployments, the first administrator can optionally be bootstrapped before startup using `XYBERGEN_ADMIN_USERNAME` and `XYBERGEN_ADMIN_PASSWORD`. The password must be at least 12 characters, and both variables must be set together.
+## Phase 1 — Current Implementation
 
-For HTTPS deployments, set `XYBERGEN_COOKIE_SECURE=1`. Keep it unset for local HTTP development. Store the database on persistent storage and restrict access to it; it contains password hashes and active session records.
+The current repository contains the initial working application and focuses on the core platform and workflow:
 
-## Roles
+1. **FastAPI-based web application**
+2. **Role-based access:** Admin, Analyst, Viewer
+3. **User registration and role management**
+4. **Document, scan, audio, and video intake**
+5. **Submission history and report management**
+6. **Generated-output tracking**
+7. **SQLite-based persistence**
+   > **Note:** SQLite-based persistence may be changed to PostgreSQL.
+9. **Hashed session tokens and session expiry**
+10. **CSRF protection** for authentication and account-management operations
 
-| Role | Permissions |
-| --- | --- |
-| Viewer | Workspace overview |
-| Analyst | Workspace overview and reports |
-| Admin | Overview, reports, and account creation |
+    
+### Demo Video
 
-## Document intake and reports
+[![XyberGen Demo](https://img.youtube.com/vi/iUsUd0wf0Uc/0.jpg)](https://www.youtube.com/watch?v=iUsUd0wf0Uc)
 
-The Overview page accepts documents, scans, audio, and video with optional descriptions. Uploads and their metadata are stored in SQLite per user and appear in the submission history; the Overview never displays generated output. The current upload flow stores source files but does not run masking or a data-diode pipeline. That processing still requires the ingestion service.
+**[▶ Watch the XyberGen Demo on YouTube](https://www.youtube.com/watch?v=iUsUd0wf0Uc)**
 
-Reports groups published outputs by source document and supports category and text filters. It displays only rows marked both verified and rehydrated in `verified_reports`. Generated summaries are saved per user and document in `generated_outputs` with verification and rehydration disabled by default. Reports shows their source, format, date, and pending status, but never their generated text until those checks are complete. No verification or rehydration service currently promotes these outputs into `verified_reports`.
+> **Note:** Phase 1 is the current MVP. Advanced AI transformation, PII masking, entity vaulting, and data-diode processing are planned for later phases.
 
-The application does not currently have a chat/conversation feature or chat-history storage. Chat retention must be added with that workflow; it should not be inferred from document upload history.
+## How to Run Locally
 
-Passwords are stored as salted PBKDF2 hashes. Sessions use random opaque tokens stored as hashes in SQLite, expire after eight hours, and are invalidated on sign-out. Sign-in, registration, user provisioning, role changes, and sign-out use CSRF tokens.
+1. Clone the repository using `git clone https://github.com/Ambuj-code-tech/XyberGen.git`.
+2. Navigate to the project using `cd XyberGen`.
+3. Create a virtual environment using `python -m venv venv`.
+   
+4. Activate the virtual environment:
+   - **Windows:** `venv\Scripts\activate`
+   - **Linux/macOS:** `source venv/bin/activate`
+
+5. Install dependencies using `pip install -r requirements.txt`.
+6. Start the FastAPI server using `uvicorn main:app --reload`.
+7. Open `http://127.0.0.1:8000` in your browser.
+
+### API Documentation
+
+Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
+
+## Phase 2 — Ongoing Enhancements
+
+1. **Improved LLM-based executive summaries**
+2. **Additional content-output formats**
+3. **Admin deregistration with at least one admin preserved**
+4. **Restrict uploads to Analyst/Admin roles**
+5. **PII masking and local Redis-based entity vault**
+6. **Controlled re-identification**
+7. **JSON/schema validation**
+8. **Local LLM integration**
+9. **Optional Web Application Firewall**
+
+XyberGen — Content Transformation Workflow
+
+        ┌─────────────┐
+        │    INPUT    │
+        │ Documents   │
+        │ Scans       │
+        │ Audio/Video │
+        └──────┬──────┘
+               ↓
+        ┌─ ─── ── ── ── ──  ┐
+        │  Pre-processing   │
+        │    Validation     │
+        │     & Format      │
+        └── ── ──┬─ ── ──  ─┘
+                ↓
+        ┌─────────────┐
+        │ PII Masking │
+        │ & Protection│
+        └──────┬──────┘
+               ↓
+        ┌─────────────┐
+        │ Retrieval / │
+        │     RAG     │
+        └──────┬──────┘
+               ↓
+        ┌─────────────┐
+        │  Local LLM  │
+        │Analyze/Gen. │
+        └──────┬──────┘
+               ↓
+        ┌─────────────┐
+        │  Validation │
+        │JSON / Schema│
+        └──────┬──────┘
+               ↓
+        ┌─────────────┐
+        │   OUTPUT    │
+        │ Reports     │
+        │ Summaries   │
+        │ Multi-format│
+        └─────────────┘
+## Phase 3 — Production & Security Hardening
+
+1. **Multi-client deployment with a centralized server**
+2. **Data-diode integration** at defined system boundaries
+3. **Restricted JSON-based communication** across diode-controlled interfaces
+4. **SHA-256 hashing** for data integrity verification
+5. **DDoS protection** for production deployment
+6. **Production-level security testing**
+7. **Penetration testing and vulnerability assessment**
+8. **End-to-end security validation** of authentication, authorization, and data flow
+9. **Performance and scalability testing** for multiple concurrent clients
+10. **Production monitoring and audit logging**
+11. **Secure deployment hardening** across the complete application and infrastructure
+
+---
+## 🛠️ Technology Stack
+
+* **Backend Framework:** FastAPI, Python
+* **Data Storage:** SQLite, Local Redis Cache (Entity Vaulting), Qdrant Vector DB (Local Knowledge Base)
+* **Message Broker:** RabbitMQ (Secure high-speed staging)
+* **Frontend/Templating:** HTML/CSS, Jinja2
+* **Security & Auth:** Keycloak (RBAC), Custom SHA-256 Hashing Pipelines
+
+---
+
+> **Goal:** Evolve XyberGen from an MVP into a production-ready, secure, scalable, and controlled platform for sensitive environments.
