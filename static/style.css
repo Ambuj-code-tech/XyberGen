@@ -763,6 +763,49 @@ form button span {
     background: #fff;
 }
 
+.profile-panel,
+.memory-form-panel,
+.submission-history,
+.overview-intake,
+.overview-history {
+    position: relative;
+    isolation: isolate;
+    transition: transform 240ms ease, border-color 240ms ease, box-shadow 240ms ease;
+}
+
+.profile-panel::before,
+.memory-form-panel::before,
+.submission-history::before,
+.overview-intake::before,
+.overview-history::before {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    background-color: #eff6e9;
+    content: "";
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 320ms ease;
+}
+
+.profile-panel:hover,
+.memory-form-panel:hover,
+.submission-history:hover,
+.overview-intake:hover,
+.overview-history:hover {
+    transform: translateY(-3px);
+    border-color: #73966a;
+    box-shadow: 0 8px 20px rgba(38, 75, 42, 0.16);
+}
+
+.profile-panel:hover::before,
+.memory-form-panel:hover::before,
+.submission-history:hover::before,
+.overview-intake:hover::before,
+.overview-history:hover::before {
+    transform: scaleX(1);
+}
+
 .section-heading {
     display: flex;
     align-items: center;
