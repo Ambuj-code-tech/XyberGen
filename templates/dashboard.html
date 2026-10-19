@@ -8,16 +8,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=pending-reports-3">
+    <link rel="stylesheet" href="/static/style.css?v=sidebar-toggle-1">
 </head>
 <body class="workspace-body">
     <main class="workspace">
         <header class="workspace-header">
+            <button class="sidebar-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="true" aria-label="Hide navigation" title="Hide navigation">
+                <span></span><span></span><span></span>
+            </button>
             <a class="workspace-brand" href="/dashboard">
                 <span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span>
                 <span>XyberGen</span>
             </a>
             <div class="account-menu">
+                {% if has_profile_picture %}<img class="account-avatar" src="/account/profile-picture" alt="Profile picture">{% else %}<span class="user-avatar account-avatar-fallback" aria-hidden="true">{{ username[0]|upper }}</span>{% endif %}
                 <div class="account-copy">
                     <strong>{{ username }}</strong>
                     <span>{{ role }}</span>
@@ -30,7 +34,7 @@
         </header>
 
         <div class="workspace-body-layout">
-            <aside class="workspace-sidebar" aria-label="Workspace navigation">
+            <aside id="workspace-sidebar" class="workspace-sidebar" aria-label="Workspace navigation">
                 <p class="sidebar-label">WORKSPACE</p>
                 <a class="nav-link {% if page == 'dashboard' %}active{% endif %}" href="/dashboard"><span>01</span> Overview</a>
                 <a class="nav-link {% if page == 'upload' %}active{% endif %}" href="/dashboard/upload"><span>02</span> Upload</a>
@@ -49,32 +53,63 @@
                 <div class="page-heading">
                     <p class="eyebrow">ACCESS CONTROL / USERS</p>
                     <h1>User access</h1>
-                    <p>Provision accounts and assign the least access each person needs.</p>
+                    <p>Review account status and manage roles, flags, and registration access.</p>
                 </div>
                 {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
                 {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
 
-                <div class="admin-grid">
-                    <section class="content-panel">
-                        <div class="section-heading"><div><p class="eyebrow">NEW ACCOUNT</p><h2>Add a user</h2></div><span class="panel-index">01</span></div>
-                        <form class="admin-form" action="/admin/users" method="POST">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <label for="new-username">Username</label>
-                            <input id="new-username" name="username" type="text" minlength="3" maxlength="64" autocomplete="off" placeholder="e.g. jordan_lee" required>
-                            <label for="new-password">Temporary password</label>
-                            <input id="new-password" name="password" type="password" minlength="12" autocomplete="new-password" placeholder="At least 12 characters" required>
-                            <p class="role-default-note">New accounts receive the Viewer role. Change access below when needed.</p>
-                            <button type="submit">Create viewer account <span aria-hidden="true">&#8594;</span></button>
-                        </form>
-                    </section>
+                <div class="user-stats" aria-label="User account totals">
+                    <article class="user-stat-card"><span class="user-stat-mark">01</span><div><strong>{{ active_user_count }}</strong><span>Active accounts</span></div></article>
+                    <article class="user-stat-card flagged-stat"><span class="user-stat-mark">02</span><div><strong>{{ flagged_user_count }}</strong><span>Red-flagged</span></div></article>
+                    <article class="user-stat-card"><span class="user-stat-mark">03</span><div><strong>{{ scheduled_deletion_count }}</strong><span>Deletion scheduled</span></div></article>
+                    <article class="user-stat-card"><span class="user-stat-mark">04</span><div><strong>{{ retained_data_count }}</strong><span>Data retained</span></div></article>
+                </div>
 
-                    <section class="content-panel user-list-panel">
-                        <div class="section-heading"><div><p class="eyebrow">DIRECTORY</p><h2>Accounts</h2></div><span class="panel-index">{{ users|length }}</span></div>
-                        <div class="user-list">
-                            {% for account in users %}
-                            <div class="user-row">
-                                <span class="user-avatar">{{ account.username[0]|upper }}</span>
-                                <span class="user-identity"><strong>{{ account.username }}</strong><small>{{ account.created_at[:10] }}</small></span>
+                <nav class="account-filter-bar" aria-label="Filter accounts">
+                    <span class="account-filter-label">SHOW</span>
+                    <div class="account-filter-options">
+                        {% for filter_key, filter_label in [
+                            ('all', 'All accounts'),
+                            ('active', 'Active'),
+                            ('flagged', 'Flagged'),
+                            ('deregistered', 'Deregistered'),
+                            ('scheduled', 'Deletion scheduled'),
+                            ('retained', 'Data retained')
+                        ] %}
+                        <a class="account-filter-link {% if account_filter == filter_key %}selected{% endif %}"
+                           href="/admin/users?filter={{ filter_key }}"
+                           {% if account_filter == filter_key %}aria-current="page"{% endif %}>
+                            {{ filter_label }} <span>{{ account_filter_counts[filter_key] }}</span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </nav>
+
+                <section class="content-panel user-list-panel">
+                    <div class="section-heading directory-heading">
+                        <div><p class="eyebrow">DIRECTORY / {{ account_filter_label|upper }}</p><h2>{{ account_filter_label }}</h2><p class="directory-caption">Deregistered account data is permanently deleted after three months unless retained or restored.</p></div>
+                        <span class="panel-index">{{ users|length }}</span>
+                    </div>
+                    {% if users %}
+                    <div class="user-list">
+                        {% for account in users %}
+                        <div class="user-row">
+                            <span class="user-avatar user-list-avatar">{{ account.username[0]|upper }}</span>
+                            <span class="user-identity">
+                                <strong>{{ account.username }}{% if account.id == user_id %} (you){% endif %}</strong>
+                                <small>Joined {{ account.created_at[:10] }}</small>
+                            </span>
+                            <div class="user-state">
+                                <span class="role-badge role-{{ account.role_name }}">{{ account.role_name|title }}</span>
+                                <span class="account-status {% if not account.is_active %}status-deregistered{% elif account.is_suspended %}status-flagged{% else %}status-active{% endif %}">
+                                    <i aria-hidden="true"></i>{% if not account.is_active %}Deregistered{% elif account.is_suspended %}Suspended{% else %}Active{% endif %}
+                                </span>
+                                {% if not account.is_active %}
+                                <small class="retention-info">{% if account.keep_data %}Data retained{% elif account.purge_after %}Delete after {{ account.purge_after[:10] }}{% else %}Deletion date unavailable{% endif %}</small>
+                                {% endif %}
+                            </div>
+                            {% if account.id != user_id and account.is_active %}
+                            <div class="user-admin-actions" aria-label="Actions for {{ account.username }}">
                                 <form class="role-edit-form" action="/admin/users/{{ account.id }}/role" method="POST">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <label class="visually-hidden" for="role-{{ account.id }}">Role for {{ account.username }}</label>
@@ -85,19 +120,44 @@
                                     </select>
                                     <button type="submit" aria-label="Save role for {{ account.username }}" title="Save role">&#10003;</button>
                                 </form>
+                                <form action="/admin/users/{{ account.id }}/flag" method="POST" onsubmit="return confirm('{% if account.is_suspended %}Clear the red flag for{% else %}Red-flag and suspend{% endif %} {{ account.username }}?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button class="secondary-admin-action" type="submit">{% if account.is_suspended %}Clear flag{% else %}Red-flag{% endif %}</button>
+                                </form>
+                                <form action="/admin/users/{{ account.id }}/deregister" method="POST" onsubmit="return confirm('Deregister {{ account.username }}? Their account data will be preserved.')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button class="danger-admin-action" type="submit">Deregister</button>
+                                </form>
                             </div>
-                            {% endfor %}
+                            {% elif not account.is_active %}
+                            <div class="user-admin-actions archived-user-actions" aria-label="Retention actions for {{ account.username }}">
+                                <form action="/admin/users/{{ account.id }}/restore" method="POST" onsubmit="return confirm('Restore {{ account.username }} and cancel scheduled deletion?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button type="submit">Restore account</button>
+                                </form>
+                                <form action="/admin/users/{{ account.id }}/retention" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    {% if account.keep_data %}
+                                    <input type="hidden" name="intent" value="schedule">
+                                    <button class="secondary-admin-action" type="submit">Resume 3-month deletion</button>
+                                    {% else %}
+                                    <input type="hidden" name="intent" value="keep">
+                                    <button class="secondary-admin-action" type="submit">Keep data</button>
+                                    {% endif %}
+                                </form>
+                            </div>
+                            {% elif account.id == user_id %}
+                            <span class="self-account-note">Your account</span>
+                            {% endif %}
                         </div>
-                    </section>
-                </div>
-
-                <section class="role-guide">
-                    <p class="eyebrow">ROLE PERMISSIONS</p>
-                    <div class="role-guide-grid">
-                        <div><strong>Viewer</strong><span>Workspace overview</span></div>
-                        <div><strong>Analyst</strong><span>Overview and reports</span></div>
-                        <div><strong>Admin</strong><span>All areas and user management</span></div>
+                        {% endfor %}
                     </div>
+                    {% else %}
+                    <div class="account-filter-empty" role="status">
+                        <span class="report-mark" aria-hidden="true">00</span>
+                        <div><strong>No {{ account_filter_label|lower }} found</strong><p>Choose another filter to view other accounts.</p></div>
+                    </div>
+                    {% endif %}
                 </section>
 
                 {% elif page == 'upload' %}
@@ -331,6 +391,43 @@
                 </div>
                 {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
                 {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
+                <section class="content-panel profile-panel">
+                    <div class="section-heading profile-heading"><div><p class="eyebrow">YOUR ACCOUNT</p><h2>Profile settings</h2><p class="directory-caption">Keep your account details up to date.</p></div><span class="panel-index">01</span></div>
+                    <form class="profile-form" action="/account/profile" method="POST" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <div class="profile-preview">
+                            {% if has_profile_picture %}
+                            <img class="profile-preview-image" src="/account/profile-picture" alt="Your current profile picture">
+                            {% else %}
+                            <span class="profile-preview-fallback" aria-hidden="true">{{ username[0]|upper }}</span>
+                            {% endif %}
+                            <div class="profile-preview-copy">
+                                <span class="eyebrow">SIGNED IN AS</span>
+                                <strong>{{ username }}</strong>
+                                <span class="role-badge role-{{ role }}">{{ role|title }} account</span>
+                            </div>
+                        </div>
+                        <div class="profile-fields">
+                            <div class="profile-field">
+                                <label for="profile-username">Username</label>
+                                <input id="profile-username" name="username" type="text" minlength="3" maxlength="64" value="{{ username }}" autocomplete="username" required>
+                                <small>3–64 letters, numbers, underscores, or hyphens.</small>
+                            </div>
+                            <div class="profile-field">
+                                <label for="profile-picture">Profile picture</label>
+                                <input id="profile-picture" name="profile_picture" type="file" accept="image/jpeg,image/png,image/gif,image/webp">
+                                <small>JPEG, PNG, GIF or WebP · maximum 2 MB.</small>
+                            </div>
+                        </div>
+                        {% if has_profile_picture %}
+                        <label class="profile-remove-option"><input type="checkbox" name="remove_profile_picture" value="1"> Remove current picture</label>
+                        {% endif %}
+                        <div class="profile-form-footer">
+                            <span>Your profile is visible only within your signed-in workspace.</span>
+                            <button type="submit">Save changes <span aria-hidden="true">&#8594;</span></button>
+                        </div>
+                    </form>
+                </section>
                 <div class="overview-grid">
                     <section class="content-panel access-panel">
                         <div class="section-heading"><div><p class="eyebrow">YOUR ACCESS</p><h2>Permissions</h2></div><span class="panel-index">{{ permissions|length }}</span></div>
@@ -394,5 +491,27 @@
             </section>
         </div>
     </main>
+    <script>
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const workspaceLayout = document.querySelector('.workspace-body-layout');
+        const workspaceSidebar = document.getElementById('workspace-sidebar');
+
+        if (sidebarToggle && workspaceLayout && workspaceSidebar) {
+            sidebarToggle.addEventListener('click', () => {
+                const isExpanded = sidebarToggle.getAttribute('aria-expanded') === 'true';
+                const nextExpanded = !isExpanded;
+                workspaceLayout.classList.toggle('sidebar-collapsed', !nextExpanded);
+                sidebarToggle.setAttribute('aria-expanded', String(nextExpanded));
+                sidebarToggle.setAttribute('aria-label', nextExpanded ? 'Hide navigation' : 'Show navigation');
+                sidebarToggle.setAttribute('title', nextExpanded ? 'Hide navigation' : 'Show navigation');
+                workspaceSidebar.setAttribute('aria-hidden', String(!nextExpanded));
+                if (nextExpanded) {
+                    workspaceSidebar.removeAttribute('inert');
+                } else {
+                    workspaceSidebar.setAttribute('inert', '');
+                }
+            });
+        }
+    </script>
 </body>
 </html>

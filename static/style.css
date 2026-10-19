@@ -466,15 +466,65 @@ form button span {
     display: flex;
     height: 76px;
     align-items: center;
-    justify-content: space-between;
+    gap: 15px;
     padding: 0 34px;
     border-bottom: 1px solid var(--line);
+}
+
+.sidebar-toggle {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    align-content: center;
+    justify-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid #dce7d4;
+    border-radius: 3px;
+    color: #315841;
+    background: #f7faf4;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease;
+}
+
+.sidebar-toggle:hover {
+    border-color: #a8bd9e;
+    background: #eaf1e7;
+}
+
+.sidebar-toggle:focus-visible {
+    outline: 3px solid rgba(93, 136, 113, 0.2);
+    outline-offset: 2px;
+}
+
+.sidebar-toggle span {
+    display: block;
+    width: 15px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentColor;
+    transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.sidebar-toggle[aria-expanded="false"] span:first-child {
+    transform: translateY(6px);
+}
+
+.sidebar-toggle[aria-expanded="false"] span:nth-child(2) {
+    opacity: 0;
+}
+
+.sidebar-toggle[aria-expanded="false"] span:last-child {
+    transform: translateY(-6px) rotate(90deg);
 }
 
 .workspace-brand {
     display: inline-flex;
     align-items: center;
     gap: 10px;
+    margin-right: auto;
     color: var(--ink);
     font-size: 16px;
     font-weight: 800;
@@ -493,6 +543,19 @@ form button span {
     display: flex;
     align-items: center;
     gap: 15px;
+}
+
+.account-avatar {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.account-avatar-fallback {
+    width: 36px;
+    height: 36px;
 }
 
 .account-copy {
@@ -568,6 +631,7 @@ form button span {
     display: grid;
     min-height: 680px;
     grid-template-columns: 220px minmax(0, 1fr);
+    transition: grid-template-columns 200ms ease;
 }
 
 .workspace-sidebar {
@@ -577,6 +641,20 @@ form button span {
     padding: 30px 17px;
     border-right: 1px solid var(--line);
     background: #fafbf9;
+    overflow: hidden;
+    transition: padding 200ms ease, border-color 200ms ease, opacity 150ms ease;
+}
+
+.workspace-body-layout.sidebar-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.workspace-body-layout.sidebar-collapsed .workspace-sidebar {
+    visibility: hidden;
+    padding-right: 0;
+    padding-left: 0;
+    border-right-color: transparent;
+    opacity: 0;
 }
 
 .sidebar-label {
@@ -648,8 +726,7 @@ form button span {
 
 .page-heading .eyebrow,
 .content-panel .eyebrow,
-.access-summary .eyebrow,
-.role-guide .eyebrow {
+.access-summary .eyebrow {
     color: #718276;
     font-size: 9px;
 }
@@ -787,6 +864,183 @@ form button span {
 .admin-grid {
     grid-template-columns: minmax(230px, 0.85fr) minmax(250px, 1fr);
     align-items: start;
+}
+
+.user-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: -13px 0 19px;
+}
+
+.user-stat-card {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid #e1e8dd;
+    background: #fafbf9;
+}
+
+.user-stat-mark {
+    display: grid;
+    width: 31px;
+    height: 31px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid #dce7d4;
+    border-radius: 50%;
+    color: #6c8066;
+    font-family: var(--mono);
+    font-size: 8px;
+}
+
+.user-stat-card > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.user-stat-card strong {
+    font-size: 19px;
+    line-height: 1;
+}
+
+.user-stat-card > div > span {
+    color: var(--muted);
+    font-size: 9px;
+}
+
+.flagged-stat .user-stat-mark {
+    border-color: #eadcc6;
+    color: #a36b37;
+    background: #fbf6ed;
+}
+
+.account-filter-bar {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: -4px 0 17px;
+}
+
+.account-filter-label {
+    padding-top: 9px;
+    color: #87928b;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.8px;
+}
+
+.account-filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.account-filter-link {
+    display: inline-flex;
+    min-height: 32px;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    border: 1px solid #e1e8dd;
+    border-radius: 2px;
+    color: #59655d;
+    background: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+.account-filter-link span {
+    display: grid;
+    min-width: 18px;
+    height: 18px;
+    place-items: center;
+    padding: 0 4px;
+    border-radius: 9px;
+    color: #68756c;
+    background: #f0f3ee;
+    font-family: var(--mono);
+    font-size: 8px;
+}
+
+.account-filter-link:hover {
+    border-color: #a8bd9e;
+    color: #315841;
+}
+
+.account-filter-link.selected {
+    border-color: var(--forest);
+    color: #f4f6ed;
+    background: var(--forest);
+}
+
+.account-filter-link.selected span {
+    color: var(--forest);
+    background: var(--lime);
+}
+
+.account-filter-link:focus-visible {
+    outline: 3px solid rgba(93, 136, 113, 0.2);
+    outline-offset: 2px;
+}
+
+.directory-heading {
+    align-items: flex-start;
+}
+
+.directory-heading h2,
+.profile-heading h2 {
+    display: block;
+    width: auto;
+    height: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    color: var(--ink);
+    font-family: "Manrope", "Segoe UI", sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+
+.directory-caption {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.directory-heading .panel-index,
+.profile-heading .panel-index {
+    border-radius: 50%;
+}
+
+.account-filter-empty {
+    display: flex;
+    min-height: 130px;
+    align-items: center;
+    gap: 13px;
+    padding: 20px 5px;
+}
+
+.account-filter-empty .report-mark {
+    width: 40px;
+    height: 40px;
+}
+
+.account-filter-empty strong {
+    font-size: 12px;
+}
+
+.account-filter-empty p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 10px;
 }
 
 .memory-grid {
@@ -1083,17 +1337,118 @@ form button span {
     line-height: 1.5;
 }
 
-.admin-form {
-    gap: 9px;
-    margin-top: 20px;
+.profile-form {
+    display: grid;
+    gap: 21px;
+    margin-top: 18px;
 }
 
-.admin-form label {
-    margin: 5px 0 0;
+.profile-panel {
+    margin-bottom: 20px;
 }
 
-.admin-form input,
-.admin-form select {
+.profile-preview {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 16px;
+    padding: 17px;
+    border: 1px solid #e2e9df;
+    background: #fafbf9;
+}
+
+.profile-preview-image,
+.profile-preview-fallback {
+    display: grid;
+    width: 66px;
+    height: 66px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px #dce7d4;
+}
+
+.profile-preview-image {
+    object-fit: cover;
+}
+
+.profile-preview-fallback {
+    color: #315841;
+    background: #eaf1e7;
+    font-size: 23px;
+    font-weight: 800;
+}
+
+.profile-preview-copy {
+    display: grid;
+    min-width: 0;
+    justify-items: start;
+    gap: 5px;
+}
+
+.profile-preview-copy .eyebrow {
+    margin: 0;
+    color: #718276;
+    font-size: 8px;
+}
+
+.profile-preview-copy > strong {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 15px;
+    text-overflow: ellipsis;
+}
+
+.role-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border: 1px solid #e0e8da;
+    border-radius: 2px;
+    color: #526b51;
+    background: #f2f6ed;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.role-admin {
+    border-color: #d8e4b2;
+    color: #49612f;
+    background: #f4f8e6;
+}
+
+.role-analyst {
+    border-color: #d7e6e0;
+    color: #315c50;
+    background: #eef6f2;
+}
+
+.profile-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.profile-field {
+    display: grid;
+    min-width: 0;
+    align-content: start;
+    gap: 7px;
+}
+
+.profile-field label {
+    color: #46564b;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.profile-field input[type="text"],
+.profile-field input[type="file"] {
     width: 100%;
     min-height: 43px;
     padding: 0 11px;
@@ -1105,38 +1460,81 @@ form button span {
     font-size: 11px;
 }
 
-.admin-form input:focus,
-.admin-form select:focus {
+.profile-field input[type="file"] {
+    padding: 10px;
+}
+
+.profile-field input:focus-visible {
     outline: 3px solid rgba(93, 136, 113, 0.16);
     border-color: #5d8871;
 }
 
-.admin-form button {
-    margin-top: 7px;
-}
-
-.role-default-note {
-    margin: 2px 0;
+.profile-field small {
     color: var(--muted);
     font-size: 10px;
-    line-height: 1.6;
+    line-height: 1.5;
+}
+
+.profile-form .profile-remove-option {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.profile-form .profile-remove-option input {
+    width: auto;
+    min-height: 0;
+}
+
+.profile-form-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #edf0ec;
+}
+
+.profile-form-footer > span {
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.profile-form-footer button {
+    flex: 0 0 auto;
+    margin: 0;
 }
 
 .user-list {
     display: grid;
+    margin-top: 4px;
 }
 
 .user-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 38px minmax(125px, 1fr) minmax(130px, auto) auto;
     min-width: 0;
     align-items: center;
-    gap: 10px;
-    padding: 13px 0;
+    gap: 13px;
+    padding: 15px 10px;
     border-bottom: 1px solid #edf0ec;
+    transition: background 140ms ease;
+}
+
+.user-row:hover {
+    background: #fafbf9;
 }
 
 .user-row:last-child {
     border-bottom: 0;
+}
+
+.user-list-avatar {
+    width: 38px;
+    height: 38px;
+    border: 1px solid #dce7d4;
+    font-size: 12px;
 }
 
 .user-avatar {
@@ -1155,13 +1553,12 @@ form button span {
 .user-identity {
     display: grid;
     min-width: 0;
-    flex: 1;
-    gap: 3px;
+    gap: 4px;
 }
 
 .user-identity strong {
     overflow: hidden;
-    font-size: 11px;
+    font-size: 12px;
     text-overflow: ellipsis;
 }
 
@@ -1171,17 +1568,89 @@ form button span {
     font-size: 9px;
 }
 
+.user-state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+}
+
+.retention-info {
+    flex-basis: 100%;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 8px;
+}
+
+.account-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #526b51;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.account-status i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #72a267;
+}
+
+.status-flagged {
+    color: #8b542a;
+}
+
+.status-flagged i {
+    background: #d89148;
+}
+
+.status-deregistered {
+    color: #737d76;
+}
+
+.status-deregistered i {
+    background: #a9b0aa;
+}
+
+.self-account-note {
+    justify-self: end;
+    color: #718276;
+    font-family: var(--mono);
+    font-size: 8px;
+    text-transform: uppercase;
+}
+
+.user-admin-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+}
+
+.user-admin-actions form {
+    margin: 0;
+}
+
+.archived-user-actions {
+    flex-wrap: wrap;
+}
+
 .role-edit-form {
     display: flex;
     flex: 0 0 auto;
     flex-direction: row;
     align-items: center;
     gap: 5px;
+    margin: 0;
 }
 
 .role-edit-form select {
     width: 78px;
-    height: 30px;
+    min-height: 32px;
+    height: 32px;
+    flex: 0 0 78px;
     padding: 0 5px;
     border: 1px solid #dce2dc;
     border-radius: 2px;
@@ -1191,10 +1660,54 @@ form button span {
     font-size: 9px;
 }
 
+.user-admin-actions button {
+    min-height: 32px;
+    padding: 0 9px;
+    border: 1px solid #dce2dc;
+    border-radius: 2px;
+    color: #315c43;
+    background: #f4f8ef;
+    font: inherit;
+    font-size: 9px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.user-admin-actions button:hover {
+    border-color: #b7c9aa;
+    background: #eaf1e3;
+    transform: translateY(-1px);
+}
+
+.user-admin-actions .danger-admin-action {
+    border-color: #eadbd4;
+    color: #8b4b39;
+    background: #fbf5f2;
+}
+
+.user-admin-actions .danger-admin-action:hover {
+    border-color: #d9b8aa;
+    background: #f8ece6;
+}
+
+.user-admin-actions .secondary-admin-action {
+    color: #6e6043;
+    background: #faf7ee;
+}
+
+.user-admin-actions button:focus-visible,
+.role-edit-form select:focus-visible,
+.profile-form button:focus-visible {
+    outline: 3px solid rgba(93, 136, 113, 0.2);
+    outline-offset: 2px;
+}
+
 .role-edit-form button {
     display: grid;
     width: 30px;
-    height: 30px;
+    min-height: 32px;
+    height: 32px;
     flex: 0 0 auto;
     place-items: center;
     margin: 0;
@@ -1214,35 +1727,6 @@ form button span {
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     clip-path: inset(50%);
-}
-
-.role-guide {
-    margin-top: 19px;
-    padding: 20px 22px;
-    border: 1px solid var(--line);
-    background: #fafbf9;
-}
-
-.role-guide-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 15px;
-}
-
-.role-guide-grid div {
-    display: grid;
-    gap: 5px;
-}
-
-.role-guide-grid strong {
-    font-size: 11px;
-}
-
-.role-guide-grid span {
-    color: var(--muted);
-    font-size: 10px;
-    line-height: 1.5;
 }
 
 .configure-grid {
@@ -1722,6 +2206,10 @@ form button span {
         grid-template-columns: 1fr;
     }
 
+    .workspace-body-layout.sidebar-collapsed {
+        grid-template-columns: 1fr;
+    }
+
     .workspace-sidebar {
         display: flex;
         flex-direction: row;
@@ -1730,6 +2218,10 @@ form button span {
         padding: 10px 15px;
         border-right: 0;
         border-bottom: 1px solid var(--line);
+    }
+
+    .workspace-body-layout.sidebar-collapsed .workspace-sidebar {
+        display: none;
     }
 
     .sidebar-label,
@@ -1751,8 +2243,73 @@ form button span {
 
     .overview-grid,
     .admin-grid,
-    .overview-workspace-grid {
+    .overview-workspace-grid,
+    .profile-fields {
         grid-template-columns: 1fr;
+    }
+
+    .user-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px;
+    }
+
+    .user-stat-card {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        padding: 11px;
+    }
+
+    .user-stat-card strong {
+        font-size: 17px;
+    }
+
+    .user-stat-card > div > span {
+        font-size: 8px;
+    }
+
+    .user-row {
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 13px 2px;
+    }
+
+    .user-list-avatar {
+        width: 34px;
+        height: 34px;
+    }
+
+    .user-state {
+        grid-column: 2 / -1;
+        grid-row: 2;
+        padding-bottom: 2px;
+    }
+
+    .user-admin-actions {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        padding: 2px 0 3px 46px;
+    }
+
+    .self-account-note {
+        grid-column: 3;
+        grid-row: 1;
+    }
+
+    .profile-preview {
+        padding: 13px;
+    }
+
+    .profile-form-footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .profile-form-footer button {
+        width: 100%;
+        justify-content: center;
     }
 
     .ingest-form {
@@ -1815,10 +2372,6 @@ form button span {
         min-height: 220px;
     }
 
-    .role-guide-grid {
-        grid-template-columns: 1fr;
-    }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1831,4 +2384,3 @@ form button span {
         transition-duration: 0.01ms !important;
     }
 }
-

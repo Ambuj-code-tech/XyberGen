@@ -1,14 +1,17 @@
+import asyncio
+import calendar
 import hashlib
 import hmac
 import importlib.util
+import logging
 import os
 import secrets
 import sqlite3
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, AsyncGenerator, Iterator
 from xml.sax.saxutils import escape
 
 import uvicorn
@@ -35,13 +38,38 @@ SESSION_COOKIE = "xybergen_session"
 LOGIN_CSRF_COOKIE = "xybergen_login_csrf"
 SESSION_LIFETIME = timedelta(hours=8)
 PASSWORD_ITERATIONS = 600_000
+MAX_PROFILE_PICTURE_BYTES = 2 * 1024 * 1024
+ACCOUNT_RETENTION_MONTHS = 3
+ACCOUNT_CLEANUP_INTERVAL_SECONDS = 60 * 60
+LOGGER = logging.getLogger(__name__)
 ROLE_PERMISSIONS = {
     "admin": {"dashboard:view", "reports:view", "users:manage"},
     "analyst": {"dashboard:view", "reports:view"},
     "viewer": {"dashboard:view"},
 }
+ADMIN_USER_FILTERS = {
+    "all": "All accounts",
+    "active": "Active",
+    "flagged": "Flagged",
+    "deregistered": "Deregistered",
+    "scheduled": "Deletion scheduled",
+    "retained": "Data retained",
+}
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+    cleanup_task = asyncio.create_task(expired_account_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -68,6 +96,43 @@ def get_connection() -> Iterator[sqlite3.Connection]:
         raise
     finally:
         connection.close()
+
+
+def add_calendar_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def purge_expired_deregistered_users(now: datetime | None = None) -> int:
+    cutoff = (now or datetime.now(timezone.utc)).isoformat()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """DELETE FROM users
+               WHERE is_active = 0 AND keep_data = 0
+                 AND purge_after IS NOT NULL AND purge_after <= ?""",
+            (cutoff,),
+        )
+        return cursor.rowcount
+
+
+async def expired_account_cleanup_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(purge_expired_deregistered_users)
+        except sqlite3.Error:
+            LOGGER.exception("Failed to purge expired deregistered accounts.")
+        await asyncio.sleep(ACCOUNT_CLEANUP_INTERVAL_SECONDS)
+
+
+def has_active_admin(connection: sqlite3.Connection) -> bool:
+    return connection.execute(
+        """SELECT 1 FROM users
+           WHERE role_name = 'admin' AND is_active = 1 AND is_suspended = 0
+           LIMIT 1"""
+    ).fetchone() is not None
 
 
 def hash_password(password: str, salt: bytes | None = None) -> str:
@@ -147,6 +212,12 @@ def initialize_database() -> None:
                 password_hash TEXT NOT NULL,
                 role_name TEXT NOT NULL REFERENCES roles(name),
                 is_active INTEGER NOT NULL DEFAULT 1,
+                is_suspended INTEGER NOT NULL DEFAULT 0,
+                deregistered_at TEXT,
+                purge_after TEXT,
+                keep_data INTEGER NOT NULL DEFAULT 0,
+                profile_picture BLOB,
+                profile_picture_mime_type TEXT,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -249,6 +320,37 @@ initialize_database()
 
 def ensure_document_output_schema() -> None:
     with get_connection() as connection:
+        user_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "is_suspended" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN is_suspended INTEGER NOT NULL DEFAULT 0"
+            )
+        if "profile_picture" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN profile_picture BLOB")
+        if "profile_picture_mime_type" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN profile_picture_mime_type TEXT")
+        if "deregistered_at" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN deregistered_at TEXT")
+        if "purge_after" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN purge_after TEXT")
+        if "keep_data" not in user_columns:
+            connection.execute(
+                "ALTER TABLE users ADD COLUMN keep_data INTEGER NOT NULL DEFAULT 0"
+            )
+        legacy_deregistered = connection.execute(
+            """SELECT id FROM users
+               WHERE is_active = 0 AND deregistered_at IS NULL"""
+        ).fetchall()
+        for account in legacy_deregistered:
+            deregistered_at = datetime.now(timezone.utc)
+            purge_after = add_calendar_months(deregistered_at, ACCOUNT_RETENTION_MONTHS)
+            connection.execute(
+                """UPDATE users SET deregistered_at = ?, purge_after = ?
+                   WHERE id = ?""",
+                (deregistered_at.isoformat(), purge_after.isoformat(), account["id"]),
+            )
         document_columns = [row[1] for row in connection.execute("PRAGMA table_info(uploaded_documents)").fetchall()]
         if "document_type" not in document_columns:
             connection.execute("ALTER TABLE uploaded_documents ADD COLUMN document_type TEXT NOT NULL DEFAULT 'document'")
@@ -329,9 +431,11 @@ def get_user_session(request: Request) -> tuple[sqlite3.Row, str] | None:
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as connection:
         row = connection.execute(
-            """SELECT users.id, users.username, users.role_name, sessions.csrf_token
+            """SELECT users.id, users.username, users.role_name,
+                      users.profile_picture_mime_type, sessions.csrf_token
                FROM sessions JOIN users ON users.id = sessions.user_id
-               WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.is_active = 1""",
+               WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+                 AND users.is_active = 1 AND users.is_suspended = 0""",
             (token_hash, now),
         ).fetchone()
     return (row, token_hash) if row else None
@@ -342,7 +446,8 @@ def user_has_permission(user_id: int, permission: str) -> bool:
         result = connection.execute(
             """SELECT 1 FROM users
                JOIN role_permissions ON role_permissions.role_name = users.role_name
-               WHERE users.id = ? AND role_permissions.permission_name = ? AND users.is_active = 1""",
+               WHERE users.id = ? AND role_permissions.permission_name = ?
+                 AND users.is_active = 1 AND users.is_suspended = 0""",
             (user_id, permission),
         ).fetchone()
     return result is not None
@@ -387,8 +492,10 @@ def user_context(request: Request, user: sqlite3.Row) -> dict[str, Any]:
         users = []
         if user["role_name"] == "admin":
             users = connection.execute(
-                """SELECT users.id, users.username, users.role_name, users.created_at
-                   FROM users ORDER BY users.username COLLATE NOCASE"""
+                """SELECT users.id, users.username, users.role_name, users.created_at,
+                          users.is_active, users.is_suspended, users.deregistered_at,
+                          users.purge_after, users.keep_data
+                   FROM users ORDER BY users.is_active DESC, users.username COLLATE NOCASE"""
             ).fetchall()
         permissions = connection.execute(
             """SELECT permission_name FROM role_permissions
@@ -397,8 +504,10 @@ def user_context(request: Request, user: sqlite3.Row) -> dict[str, Any]:
         ).fetchall()
     session = get_user_session(request)
     return {
+        "user_id": user["id"],
         "username": user["username"],
         "role": user["role_name"],
+        "has_profile_picture": bool(user["profile_picture_mime_type"]),
         "permissions": [row["permission_name"] for row in permissions],
         "users": users if user["role_name"] == "admin" else [],
         "csrf_token": session[0]["csrf_token"] if session else "",
@@ -474,6 +583,11 @@ def csrf_is_valid(request: Request, submitted_token: str) -> bool:
     return bool(session and hmac.compare_digest(session[0]["csrf_token"], submitted_token))
 
 
+def login_csrf_is_valid(request: Request, submitted_token: str) -> bool:
+    cookie_token = request.cookies.get(LOGIN_CSRF_COOKIE, "")
+    return bool(cookie_token and hmac.compare_digest(cookie_token, submitted_token))
+
+
 def session_cookie_settings(response: RedirectResponse, token: str) -> None:
     response.set_cookie(
         key=SESSION_COOKIE,
@@ -517,14 +631,24 @@ def valid_username(username: str) -> bool:
     )
 
 
+def profile_picture_mime_type(image_data: bytes) -> str | None:
+    if image_data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(image_data) >= 12 and image_data[:4] == b"RIFF" and image_data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 @app.get("/", response_class=HTMLResponse)
 async def read_home(request: Request):
     if get_user_session(request):
         return RedirectResponse("/dashboard", status_code=303)
     with get_connection() as connection:
-        admin_exists = connection.execute(
-            "SELECT 1 FROM users WHERE role_name = 'admin' AND is_active = 1 LIMIT 1"
-        ).fetchone()
+        admin_exists = has_active_admin(connection)
     if not admin_exists:
         return RedirectResponse("/setup", status_code=303)
     return render_login(
@@ -541,9 +665,7 @@ async def registration_page(request: Request):
     if get_user_session(request):
         return RedirectResponse("/dashboard", status_code=303)
     with get_connection() as connection:
-        admin_exists = connection.execute(
-            "SELECT 1 FROM users WHERE role_name = 'admin' AND is_active = 1 LIMIT 1"
-        ).fetchone()
+        admin_exists = has_active_admin(connection)
     if not admin_exists:
         return RedirectResponse("/setup", status_code=303)
     return render_login(request, {"mode": "register"})
@@ -553,8 +675,7 @@ async def registration_page(request: Request):
 async def register(request: Request):
     form = await request.form()
     submitted_csrf = str(form.get("csrf_token", ""))
-    cookie_csrf = request.cookies.get(LOGIN_CSRF_COOKIE, "")
-    if not cookie_csrf or not hmac.compare_digest(cookie_csrf, submitted_csrf):
+    if not login_csrf_is_valid(request, submitted_csrf):
         return render_login(
             request,
             {"mode": "register", "error": "The form expired. Please try again."},
@@ -586,9 +707,7 @@ async def register(request: Request):
     try:
         with get_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            admin_exists = connection.execute(
-                "SELECT 1 FROM users WHERE role_name = 'admin' AND is_active = 1 LIMIT 1"
-            ).fetchone()
+            admin_exists = has_active_admin(connection)
             if not admin_exists:
                 return RedirectResponse("/setup", status_code=303)
             cursor = connection.execute(
@@ -611,9 +730,7 @@ async def setup_page(request: Request):
     if get_user_session(request):
         return RedirectResponse("/dashboard", status_code=303)
     with get_connection() as connection:
-        admin_exists = connection.execute(
-            "SELECT 1 FROM users WHERE role_name = 'admin' AND is_active = 1 LIMIT 1"
-        ).fetchone()
+        admin_exists = has_active_admin(connection)
     if admin_exists:
         return RedirectResponse("/", status_code=303)
     return render_login(request, {"mode": "setup"})
@@ -623,8 +740,7 @@ async def setup_page(request: Request):
 async def setup_first_admin(request: Request):
     form = await request.form()
     submitted_csrf = str(form.get("csrf_token", ""))
-    cookie_csrf = request.cookies.get(LOGIN_CSRF_COOKIE, "")
-    if not cookie_csrf or not hmac.compare_digest(cookie_csrf, submitted_csrf):
+    if not login_csrf_is_valid(request, submitted_csrf):
         return render_login(
             request,
             {"mode": "setup", "error": "The form expired. Please try again."},
@@ -641,9 +757,7 @@ async def setup_first_admin(request: Request):
     try:
         with get_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            admin_exists = connection.execute(
-                "SELECT 1 FROM users WHERE role_name = 'admin' AND is_active = 1 LIMIT 1"
-            ).fetchone()
+            admin_exists = has_active_admin(connection)
             if admin_exists:
                 return RedirectResponse("/", status_code=303)
             cursor = connection.execute(
@@ -665,8 +779,7 @@ async def setup_first_admin(request: Request):
 async def login(request: Request):
     form = await request.form()
     submitted_csrf = str(form.get("csrf_token", ""))
-    cookie_csrf = request.cookies.get(LOGIN_CSRF_COOKIE, "")
-    if not cookie_csrf or not hmac.compare_digest(cookie_csrf, submitted_csrf):
+    if not login_csrf_is_valid(request, submitted_csrf):
         return render_login(
             request,
             {"mode": "login", "error": "Your sign-in form expired. Please try again."},
@@ -676,12 +789,13 @@ async def login(request: Request):
     password = str(form.get("password", ""))
     with get_connection() as connection:
         user = connection.execute(
-            "SELECT id, username, password_hash, is_active FROM users WHERE username = ? COLLATE NOCASE",
+            """SELECT id, username, password_hash, is_active, is_suspended
+               FROM users WHERE username = ? COLLATE NOCASE""",
             (username,),
         ).fetchone()
     password_hash = user["password_hash"] if user else DUMMY_PASSWORD_HASH
     authenticated = verify_password(password, password_hash)
-    if not user or not user["is_active"] or not authenticated:
+    if not user or not user["is_active"] or user["is_suspended"] or not authenticated:
         return render_login(
             request,
             {"mode": "login", "error": "The username or password is incorrect."},
@@ -702,6 +816,87 @@ async def logout(request: Request):
     response = RedirectResponse("/", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="lax")
     return response
+
+
+@app.get("/account/profile-picture")
+async def get_profile_picture(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return Response(status_code=401)
+    with get_connection() as connection:
+        profile = connection.execute(
+            "SELECT profile_picture, profile_picture_mime_type FROM users WHERE id = ?",
+            (session[0]["id"],),
+        ).fetchone()
+    if not profile or not profile["profile_picture"] or not profile["profile_picture_mime_type"]:
+        return Response(status_code=404)
+    return Response(
+        content=profile["profile_picture"],
+        media_type=profile["profile_picture_mime_type"],
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@app.post("/account/profile")
+async def update_profile(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    username = str(form.get("username", "")).strip()
+    if not valid_username(username):
+        return RedirectResponse(
+            "/dashboard?error=Use+3-64+letters,+numbers,+underscores+or+hyphens",
+            status_code=303,
+        )
+
+    uploaded_picture = form.get("profile_picture")
+    filename = str(getattr(uploaded_picture, "filename", "")).strip()
+    picture_data: bytes | None = None
+    picture_mime_type: str | None = None
+    if filename:
+        picture_data = await uploaded_picture.read(MAX_PROFILE_PICTURE_BYTES + 1)
+        if len(picture_data) > MAX_PROFILE_PICTURE_BYTES:
+            return RedirectResponse(
+                "/dashboard?error=Profile+picture+must+be+2+MB+or+less",
+                status_code=303,
+            )
+        picture_mime_type = profile_picture_mime_type(picture_data)
+        if not picture_mime_type:
+            return RedirectResponse(
+                "/dashboard?error=Use+a+JPEG,+PNG,+GIF+or+WebP+profile+picture",
+                status_code=303,
+            )
+
+    remove_picture = str(form.get("remove_profile_picture", "")) == "1"
+    try:
+        with get_connection() as connection:
+            if picture_data is not None:
+                connection.execute(
+                    """UPDATE users SET username = ?, profile_picture = ?,
+                              profile_picture_mime_type = ? WHERE id = ?""",
+                    (username, picture_data, picture_mime_type, session[0]["id"]),
+                )
+            elif remove_picture:
+                connection.execute(
+                    """UPDATE users SET username = ?, profile_picture = NULL,
+                              profile_picture_mime_type = NULL WHERE id = ?""",
+                    (username, session[0]["id"]),
+                )
+            else:
+                connection.execute(
+                    "UPDATE users SET username = ? WHERE id = ?",
+                    (username, session[0]["id"]),
+                )
+    except sqlite3.IntegrityError:
+        return RedirectResponse(
+            "/dashboard?error=That+username+already+exists",
+            status_code=303,
+        )
+    return RedirectResponse("/dashboard?success=Profile+updated", status_code=303)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -741,7 +936,7 @@ async def upload_dashboard(request: Request):
 
 
 @app.get("/dashboard/memory", response_class=HTMLResponse)
-async def memory_dashboard(request: Request):
+async def memory_dashboard():
     return RedirectResponse("/dashboard/upload", status_code=303)
 
 
@@ -1116,38 +1311,65 @@ async def admin_users(request: Request):
     user = session[0]
     if not user_has_permission(user["id"], "users:manage"):
         return HTMLResponse("Administrator permission is required.", status_code=403)
+    purge_expired_deregistered_users()
     context = user_context(request, user)
-    context.update({"page": "admin", "error": request.query_params.get("error"), "success": request.query_params.get("success")})
+    all_accounts = context["users"]
+    account_filter = request.query_params.get("filter", "all")
+    if account_filter not in ADMIN_USER_FILTERS:
+        account_filter = "all"
+    filter_counts = {
+        "all": len(all_accounts),
+        "active": sum(account["is_active"] and not account["is_suspended"] for account in all_accounts),
+        "flagged": sum(account["is_active"] and account["is_suspended"] for account in all_accounts),
+        "deregistered": sum(not account["is_active"] for account in all_accounts),
+        "scheduled": sum(
+            not account["is_active"] and not account["keep_data"] for account in all_accounts
+        ),
+        "retained": sum(
+            not account["is_active"] and account["keep_data"] for account in all_accounts
+        ),
+    }
+    accounts = [
+        account
+        for account in all_accounts
+        if account_filter == "all"
+        or (
+            account_filter == "active"
+            and account["is_active"]
+            and not account["is_suspended"]
+        )
+        or (
+            account_filter == "flagged"
+            and account["is_active"]
+            and account["is_suspended"]
+        )
+        or (account_filter == "deregistered" and not account["is_active"])
+        or (
+            account_filter == "scheduled"
+            and not account["is_active"]
+            and not account["keep_data"]
+        )
+        or (
+            account_filter == "retained"
+            and not account["is_active"]
+            and account["keep_data"]
+        )
+    ]
+    context.update({
+        "page": "admin",
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+        "users": accounts,
+        "account_filter": account_filter,
+        "account_filter_label": ADMIN_USER_FILTERS[account_filter],
+        "account_filter_counts": filter_counts,
+        "active_user_count": filter_counts["active"],
+        "flagged_user_count": filter_counts["flagged"],
+        "deregistered_user_count": filter_counts["deregistered"],
+        "scheduled_deletion_count": filter_counts["scheduled"],
+        "retained_data_count": filter_counts["retained"],
+    })
     return render_template(request, "dashboard.html", context)
-
-
-@app.post("/admin/users")
-async def create_user(request: Request):
-    session = get_user_session(request)
-    if not session:
-        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
-    user = session[0]
-    if not user_has_permission(user["id"], "users:manage"):
-        return HTMLResponse("Administrator permission is required.", status_code=403)
-    form = await request.form()
-    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
-        return HTMLResponse("Invalid request token.", status_code=403)
-    username = str(form.get("username", "")).strip()
-    password = str(form.get("password", ""))
-    if not valid_username(username):
-        return RedirectResponse("/admin/users?error=Use+3-64+letters,+numbers,+underscores+or+hyphens", status_code=303)
-    if len(password) < 12:
-        return RedirectResponse("/admin/users?error=Passwords+must+be+at+least+12+characters", status_code=303)
-    try:
-        with get_connection() as connection:
-            connection.execute(
-                """INSERT INTO users (username, password_hash, role_name, created_at)
-                   VALUES (?, ?, 'viewer', ?)""",
-                (username, hash_password(password), datetime.now(timezone.utc).isoformat()),
-            )
-    except sqlite3.IntegrityError:
-        return RedirectResponse("/admin/users?error=That+username+already+exists", status_code=303)
-    return RedirectResponse("/admin/users?success=Account+created", status_code=303)
 
 
 @app.post("/admin/users/{target_user_id}/role")
@@ -1158,33 +1380,222 @@ async def update_user_role(target_user_id: int, request: Request):
     actor = session[0]
     if not user_has_permission(actor["id"], "users:manage"):
         return HTMLResponse("Administrator permission is required.", status_code=403)
-
     form = await request.form()
     if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
         return HTMLResponse("Invalid request token.", status_code=403)
     new_role = str(form.get("role", ""))
     if new_role not in ROLE_PERMISSIONS:
         return RedirectResponse("/admin/users?error=Choose+a+valid+role", status_code=303)
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        target = connection.execute(
+            "SELECT id, role_name, is_active, is_suspended FROM users WHERE id = ?",
+            (target_user_id,),
+        ).fetchone()
+        if not target:
+            return RedirectResponse("/admin/users?error=Account+not+found", status_code=303)
+        if not target["is_active"]:
+            return RedirectResponse("/admin/users?error=Account+is+deregistered", status_code=303)
+        if (
+            target["role_name"] == "admin"
+            and new_role != "admin"
+            and not target["is_suspended"]
+            and connection.execute(
+                """SELECT COUNT(*) FROM users
+                   WHERE role_name = 'admin' AND is_active = 1 AND is_suspended = 0"""
+            ).fetchone()[0] <= 1
+        ):
+            return RedirectResponse(
+                "/admin/users?error=At+least+one+active+administrator+must+remain",
+                status_code=303,
+            )
+        connection.execute(
+            "UPDATE users SET role_name = ? WHERE id = ?",
+            (new_role, target_user_id),
+        )
+    return RedirectResponse("/admin/users?success=Role+updated", status_code=303)
+
+
+@app.post("/admin/users/{target_user_id}/flag")
+async def flag_user(target_user_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    actor = session[0]
+    if not user_has_permission(actor["id"], "users:manage"):
+        return HTMLResponse("Administrator permission is required.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+    if target_user_id == actor["id"]:
+        return RedirectResponse("/admin/users?error=You+cannot+red-flag+your+own+account", status_code=303)
 
     with get_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         target = connection.execute(
-            "SELECT id, role_name FROM users WHERE id = ?", (target_user_id,)
+            "SELECT id, role_name, is_active, is_suspended FROM users WHERE id = ?",
+            (target_user_id,),
         ).fetchone()
         if not target:
             return RedirectResponse("/admin/users?error=Account+not+found", status_code=303)
-        if target["role_name"] == "admin" and new_role != "admin":
-            admin_count = connection.execute(
-                "SELECT COUNT(*) FROM users WHERE role_name = 'admin' AND is_active = 1"
-            ).fetchone()[0]
-            if admin_count <= 1:
+        if not target["is_active"]:
+            return RedirectResponse("/admin/users?error=Account+is+deregistered", status_code=303)
+        if target["is_suspended"]:
+            connection.execute(
+                "UPDATE users SET is_suspended = 0 WHERE id = ?", (target_user_id,)
+            )
+            message = "Red+flag+cleared"
+        else:
+            if target["role_name"] == "admin" and connection.execute(
+                """SELECT COUNT(*) FROM users
+                   WHERE role_name = 'admin' AND is_active = 1 AND is_suspended = 0"""
+            ).fetchone()[0] <= 1:
                 return RedirectResponse(
-                    "/admin/users?error=At+least+one+administrator+must+remain", status_code=303
+                    "/admin/users?error=At+least+one+active+administrator+must+remain",
+                    status_code=303,
                 )
-        connection.execute(
-            "UPDATE users SET role_name = ? WHERE id = ?", (new_role, target_user_id)
+            connection.execute(
+                "UPDATE users SET is_suspended = 1 WHERE id = ?", (target_user_id,)
+            )
+            connection.execute("DELETE FROM sessions WHERE user_id = ?", (target_user_id,))
+            message = "Account+red-flagged+and+suspended"
+    return RedirectResponse(f"/admin/users?success={message}", status_code=303)
+
+
+@app.post("/admin/users/{target_user_id}/restore")
+async def restore_deregistered_user(target_user_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    actor = session[0]
+    if not user_has_permission(actor["id"], "users:manage"):
+        return HTMLResponse("Administrator permission is required.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    purge_expired_deregistered_users()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """UPDATE users
+               SET is_active = 1, is_suspended = 0, deregistered_at = NULL,
+                   purge_after = NULL, keep_data = 0
+               WHERE id = ? AND is_active = 0""",
+            (target_user_id,),
         )
-    return RedirectResponse("/admin/users?success=Role+updated", status_code=303)
+        if cursor.rowcount == 0:
+            return RedirectResponse(
+                "/admin/users?error=No+deregistered+account+found",
+                status_code=303,
+            )
+        connection.execute("DELETE FROM sessions WHERE user_id = ?", (target_user_id,))
+    return RedirectResponse(
+        "/admin/users?success=Account+restored+and+deletion+canceled",
+        status_code=303,
+    )
+
+
+@app.post("/admin/users/{target_user_id}/retention")
+async def update_deregistered_account_retention(target_user_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    actor = session[0]
+    if not user_has_permission(actor["id"], "users:manage"):
+        return HTMLResponse("Administrator permission is required.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    intent = str(form.get("intent", ""))
+    if intent not in {"keep", "schedule"}:
+        return RedirectResponse(
+            "/admin/users?error=Choose+a+valid+data+retention+action",
+            status_code=303,
+        )
+    purge_expired_deregistered_users()
+    with get_connection() as connection:
+        account = connection.execute(
+            "SELECT id, is_active FROM users WHERE id = ?", (target_user_id,)
+        ).fetchone()
+        if not account or account["is_active"]:
+            return RedirectResponse(
+                "/admin/users?error=No+deregistered+account+found",
+                status_code=303,
+            )
+        if intent == "keep":
+            connection.execute(
+                "UPDATE users SET keep_data = 1, purge_after = NULL WHERE id = ?",
+                (target_user_id,),
+            )
+            message = "Data+retained+indefinitely"
+        else:
+            purge_after = add_calendar_months(
+                datetime.now(timezone.utc), ACCOUNT_RETENTION_MONTHS
+            )
+            connection.execute(
+                "UPDATE users SET keep_data = 0, purge_after = ? WHERE id = ?",
+                (purge_after.isoformat(), target_user_id),
+            )
+            message = "Three-month+deletion+schedule+restarted"
+    return RedirectResponse(f"/admin/users?success={message}", status_code=303)
+
+
+@app.post("/admin/users/{target_user_id}/deregister")
+async def deregister_user(target_user_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    actor = session[0]
+    if not user_has_permission(actor["id"], "users:manage"):
+        return HTMLResponse("Administrator permission is required.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+    if target_user_id == actor["id"]:
+        return RedirectResponse("/admin/users?error=You+cannot+deregister+your+own+account", status_code=303)
+
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        target = connection.execute(
+            "SELECT id, role_name, is_active, is_suspended FROM users WHERE id = ?",
+            (target_user_id,),
+        ).fetchone()
+        if not target:
+            return RedirectResponse("/admin/users?error=Account+not+found", status_code=303)
+        if not target["is_active"]:
+            return RedirectResponse("/admin/users?error=Account+is+already+deregistered", status_code=303)
+        if (
+            target["role_name"] == "admin"
+            and not target["is_suspended"]
+            and connection.execute(
+                """SELECT COUNT(*) FROM users
+                   WHERE role_name = 'admin' AND is_active = 1 AND is_suspended = 0"""
+            ).fetchone()[0] <= 1
+        ):
+            return RedirectResponse(
+                "/admin/users?error=At+least+one+active+administrator+must+remain",
+                status_code=303,
+            )
+        deregistered_at = datetime.now(timezone.utc)
+        purge_after = add_calendar_months(
+            deregistered_at, ACCOUNT_RETENTION_MONTHS
+        )
+        connection.execute(
+            """UPDATE users
+               SET is_active = 0, deregistered_at = ?, purge_after = ?, keep_data = 0
+               WHERE id = ?""",
+            (
+                deregistered_at.isoformat(),
+                purge_after.isoformat(),
+                target_user_id,
+            ),
+        )
+        connection.execute("DELETE FROM sessions WHERE user_id = ?", (target_user_id,))
+    return RedirectResponse(
+        "/admin/users?success=Account+deregistered+and+scheduled+for+deletion+in+3+months",
+        status_code=303,
+    )
 
 
 if __name__ == "__main__":
