@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#eef2ec">
-    <title>{% if page == 'admin' %}User access{% elif page == 'reports' %}Reports{% else %}Workspace{% endif %} | XyberGen</title>
+    <title>{% if page == 'admin' %}User access{% elif page == 'reports' %}Reports{% elif page == 'chat' %}Chat{% else %}Workspace{% endif %} | XyberGen</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=panel-hover-2">
+    <link rel="stylesheet" href="/static/style.css?v=chat-group-controls-1">
 </head>
-<body class="workspace-body">
+<body class="workspace-body {% if page == 'chat' %}chat-workspace-body{% endif %}">
     <main class="workspace">
         <header class="workspace-header">
             <button class="sidebar-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="true" aria-label="Hide navigation" title="Hide navigation">
@@ -37,19 +37,188 @@
             <aside id="workspace-sidebar" class="workspace-sidebar" aria-label="Workspace navigation">
                 <p class="sidebar-label">WORKSPACE</p>
                 <a class="nav-link {% if page == 'dashboard' %}active{% endif %}" href="/dashboard"><span>01</span> Overview</a>
+                {% if 'documents:upload' in permissions %}
                 <a class="nav-link {% if page == 'upload' %}active{% endif %}" href="/dashboard/upload"><span>02</span> Upload</a>
+                {% endif %}
                 {% if 'reports:view' in permissions %}
-                <a class="nav-link {% if page == 'reports' %}active{% endif %}" href="/reports"><span>03</span> Reports</a>
+                <a class="nav-link {% if page == 'reports' %}active{% endif %}" href="/reports"><span>{% if 'documents:upload' in permissions %}03{% else %}02{% endif %}</span> Reports</a>
+                {% endif %}
+                {% if can_chat %}
+                <a class="nav-link {% if page == 'chat' %}active{% endif %}" href="/chat"><span>{% if 'documents:upload' in permissions and 'reports:view' in permissions %}04{% elif 'documents:upload' in permissions or 'reports:view' in permissions %}03{% else %}02{% endif %}</span> Chat</a>
                 {% endif %}
                 {% if 'users:manage' in permissions %}
                 <p class="sidebar-label admin-label">ADMINISTRATION</p>
-                <a class="nav-link {% if page == 'admin' %}active{% endif %}" href="/admin/users"><span>04</span> User access</a>
+                <a class="nav-link {% if page == 'admin' %}active{% endif %}" href="/admin/users"><span>05</span> User access</a>
                 {% endif %}
                 <div class="sidebar-role"><span class="status-dot"></span><span>Access level<br><strong>{{ role|title }}</strong></span></div>
             </aside>
 
             <section class="workspace-main">
-                {% if page == 'admin' %}
+                {% if page == 'chat' %}
+                <div class="page-heading">
+                    <p class="eyebrow">WORKSPACE / PRIVATE MESSAGING</p>
+                    <h1>Chat</h1>
+                    <p>Messages and shared files are available only to conversation members. File downloads are limited to admins and analysts.</p>
+                </div>
+                {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
+                {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
+                <div class="chat-layout">
+                    <section class="content-panel chat-directory" aria-labelledby="chat-list-title">
+                        <div class="chat-directory-heading"><div><p class="eyebrow">MESSAGES</p><h2 id="chat-list-title">Inbox <span>{{ chats|length }}</span></h2></div></div>
+                        <label class="chat-search-box" for="chat-search"><span aria-hidden="true">&#9906;</span><input id="chat-search" type="search" placeholder="Search conversations" autocomplete="off"></label>
+                        {% if chats %}
+                        <nav class="chat-list" aria-label="Your conversations">
+                            {% for chat in chats %}
+                            <a class="chat-list-item {% if selected_chat and selected_chat.id == chat.id %}selected{% endif %}" href="/chat?chat_id={{ chat.id }}" data-chat-search="{{ (chat.display_title ~ ' ' ~ chat.participant_names ~ ' ' ~ (chat.last_message or ''))|lower }}">
+                                <span class="chat-list-avatar {% if chat.chat_type == 'group' %}group-avatar{% endif %}" aria-hidden="true">{{ chat.display_title[0]|upper }}</span>
+                                <span class="chat-list-copy"><strong>{{ chat.display_title }}</strong><small>{{ chat.last_message or chat.participant_names or 'No messages yet' }}</small></span>
+                                <span class="chat-type-mark">{{ 'Group' if chat.chat_type == 'group' else 'Direct' }}{% if chat.last_message_at %}<time>{{ chat.last_message_at[11:16] }}</time>{% endif %}</span>
+                            </a>
+                            {% endfor %}
+                        </nav>
+                        <p class="chat-no-results" hidden>No conversations match your search.</p>
+                        {% else %}
+                        <div class="chat-empty-note"><span class="chat-empty-icon" aria-hidden="true">&#9993;</span><strong>Your inbox is clear</strong><span>Start a conversation to share updates and files.</span></div>
+                        {% endif %}
+                        {% if chat_users %}
+                        <details class="chat-new-conversation">
+                            <summary><span class="chat-new-toggle-mark" aria-hidden="true">+</span> New conversation</summary>
+                            <div class="chat-new-conversation-panel">
+                                <form class="chat-create-form" action="/chat/create" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <label for="chat-type">Conversation type</label>
+                                    <select id="chat-type" name="chat_type">
+                                        <option value="direct">One-on-one</option>
+                                        <option value="group">Group</option>
+                                    </select>
+                                    <div class="chat-group-name-field">
+                                        <label for="chat-title">Group name</label>
+                                        <input id="chat-title" name="title" type="text" maxlength="80" placeholder="e.g. Project team">
+                                    </div>
+                                    <fieldset class="chat-recipient-picker">
+                                        <legend>Members <span class="chat-recipient-selection" aria-live="polite"></span></legend>
+                                        <div class="chat-recipient-list" tabindex="0" aria-label="Available chat members">
+                                            {% for chat_user in chat_users %}
+                                            <label class="chat-recipient-option">
+                                                <input type="checkbox" name="recipient_ids" value="{{ chat_user.id }}">
+                                                <span class="chat-recipient-check" aria-hidden="true"></span>
+                                                <span class="chat-recipient-avatar" aria-hidden="true">{{ chat_user.username[0]|upper }}</span>
+                                                <span class="chat-recipient-identity"><strong>{{ chat_user.username }}</strong><small>{{ chat_user.role_name|title }}</small></span>
+                                            </label>
+                                            {% endfor %}
+                                        </div>
+                                    </fieldset>
+                                    <small class="chat-recipient-hint">Choose one person for a direct chat.</small>
+                                    <button type="submit">Start chatting <span aria-hidden="true">&#8594;</span></button>
+                                </form>
+                            </div>
+                        </details>
+                        {% endif %}
+                    </section>
+
+                    <section class="content-panel chat-conversation" aria-label="Conversation" {% if selected_chat %}data-chat-id="{{ selected_chat.id }}" data-chat-type="{{ selected_chat.chat_type }}" data-latest-message="{{ messages[-1].id if messages else 0 }}" data-download-allowed="{{ 'true' if role in ['admin', 'analyst'] else 'false' }}"{% endif %}>
+                        {% if selected_chat %}
+                        <div class="chat-conversation-heading">
+                            <span class="chat-conversation-avatar {% if selected_chat.chat_type == 'group' %}group-avatar{% endif %}" aria-hidden="true">{{ (selected_chat.title if selected_chat.chat_type == 'group' else selected_chat.participant_names)[0]|upper }}</span>
+                            <div class="chat-conversation-title"><h2>{{ selected_chat.title if selected_chat.chat_type == 'group' else selected_chat.participant_names }}</h2><p>{{ selected_chat.members|length }} participants · {{ 'Group conversation' if selected_chat.chat_type == 'group' else 'Private conversation' }}</p></div>
+                            <details class="chat-security-details">
+                                <summary aria-label="Conversation details" title="Conversation details">&#9432;</summary>
+                                <div class="chat-security-popover"><strong>Private conversation</strong><span>Messages and shared files are visible only to current members.</span><span>{{ selected_chat.participant_names }}</span></div>
+                            </details>
+                            <span class="chat-live-status" id="chat-live-status"><i aria-hidden="true"></i>Live</span>
+                        </div>
+                        {% if selected_chat.chat_type == 'group' and selected_chat.is_manager %}
+                        <details class="chat-member-controls">
+                            <summary><span class="chat-manage-icon" aria-hidden="true">&#9881;</span><span class="chat-manage-title">Manage group</span><span class="chat-manage-count">{{ selected_chat.members|length }} members</span><span class="chat-manage-chevron" aria-hidden="true">&#8964;</span></summary>
+                            <div class="chat-member-controls-panel">
+                                <div class="chat-member-controls-grid">
+                                    <section class="chat-member-add-section" aria-labelledby="add-chat-member-title">
+                                        <div class="chat-manage-section-heading"><span class="chat-manage-section-icon" aria-hidden="true">+</span><div><h3 id="add-chat-member-title">Add people</h3><p>Only users with chat access can join.</p></div></div>
+                                        {% if chat_available_users %}
+                                        <form class="chat-add-member-form" action="/chat/{{ selected_chat.id }}/members" method="POST">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <input type="hidden" name="intent" value="add">
+                                            <label class="visually-hidden" for="add-chat-member">Select a user to add</label>
+                                            <select id="add-chat-member" name="user_id" required>
+                                                {% for chat_user in chat_available_users %}
+                                                <option value="{{ chat_user.id }}">{{ chat_user.username }} · {{ chat_user.role_name|title }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <button type="submit">Add member <span aria-hidden="true">&#8594;</span></button>
+                                        </form>
+                                        {% else %}
+                                        <p class="chat-no-members-available">Everyone with chat access is already in this group.</p>
+                                        {% endif %}
+                                    </section>
+                                    <section class="chat-member-roster" aria-labelledby="chat-member-roster-title">
+                                        <div class="chat-manage-section-heading"><span class="chat-manage-section-icon roster-icon" aria-hidden="true">&#9776;</span><div><h3 id="chat-member-roster-title">People in this group</h3><p>{{ selected_chat.members|length }} current members</p></div></div>
+                                        <div class="chat-member-list">
+                                            {% for member in selected_chat.members %}
+                                            <div class="chat-member-row">
+                                                <span class="chat-member-avatar" aria-hidden="true">{{ member.username[0]|upper }}</span>
+                                                <span class="chat-member-identity"><strong>{{ member.username }}{% if member.id == user_id %} <em>You</em>{% endif %}</strong><small>{{ member.role_name|title }}</small></span>
+                                                {% if member.id != user_id %}
+                                                <form class="chat-remove-member" action="/chat/{{ selected_chat.id }}/members" method="POST" onsubmit="return confirm('Remove {{ member.username }} from this group? They will lose access to this conversation and its files.')">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                    <input type="hidden" name="intent" value="remove">
+                                                    <input type="hidden" name="user_id" value="{{ member.id }}">
+                                                    <button type="submit" aria-label="Remove {{ member.username }} from group" title="Remove member">&#215;</button>
+                                                </form>
+                                                {% else %}
+                                                <span class="chat-member-you">You</span>
+                                                {% endif %}
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </section>
+                                </div>
+                            </div>
+                        </details>
+                        {% endif %}
+                        <div class="chat-message-list" aria-live="polite" aria-relevant="additions text">
+                            {% if messages %}
+                            {% for message in messages %}
+                            <article class="chat-message {% if message.sender_id == user_id %}own-message{% endif %}" data-message-id="{{ message.id }}">
+                                {% if message.sender_id != user_id and selected_chat.chat_type == 'group' %}<span class="chat-message-avatar" aria-hidden="true">{{ message.sender_name[0]|upper }}</span>{% endif %}
+                                <div class="chat-message-content">
+                                <div class="chat-message-meta"><strong>{{ message.sender_name }}</strong><time datetime="{{ message.created_at }}">{{ message.created_at[:16].replace('T', ' ') }}</time></div>
+                                {% if message.body %}<p>{{ message.body }}</p>{% endif %}
+                                {% for attachment in message.attachments %}
+                                <div class="chat-attachment">
+                                    <span class="chat-attachment-icon" aria-hidden="true">&#128196;</span>
+                                    <span><strong>{{ attachment.file_name }}</strong><small>{{ attachment.source_type|replace('-', ' ')|title }} · {{ (attachment.size_bytes / 1024)|round(1) }} KB</small></span>
+                                    <a class="chat-file-view" href="/chat/attachments/{{ attachment.id }}" target="_blank" rel="noopener noreferrer">Preview</a>
+                                    {% if role in ['admin', 'analyst'] %}<a href="/chat/attachments/{{ attachment.id }}?download=1">Save</a>{% endif %}
+                                </div>
+                                {% endfor %}
+                                </div>
+                            </article>
+                            {% endfor %}
+                            {% else %}
+                            <div class="chat-empty-state"><span class="report-mark" aria-hidden="true">00</span><p>No messages yet. Start the conversation.</p></div>
+                            {% endif %}
+                        </div>
+                        <form class="chat-message-form" action="/chat/{{ selected_chat.id }}/messages" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            {% if chat_sources %}
+                            <label class="chat-attach-trigger" for="chat-source" title="Attach a file" aria-label="Attach a file">&#128206;</label>
+                            <select id="chat-source" name="source_key">
+                                <option value="">Attach a document or verified transformation…</option>
+                                {% for source in chat_sources %}<option value="{{ source.key }}">{{ source.label }}</option>{% endfor %}
+                            </select>
+                            {% endif %}
+                            <label class="visually-hidden" for="chat-message">Write a message</label>
+                            <textarea id="chat-message" name="body" rows="1" maxlength="{{ chat_message_limit }}" placeholder="Write a message…" aria-describedby="chat-composer-hint"></textarea>
+                            <div class="chat-composer-footer"><small id="chat-composer-hint">Enter to send · Shift+Enter for a new line <span id="chat-character-count">0 / {{ chat_message_limit }}</span></small><button type="submit" aria-label="Send message">Send <span aria-hidden="true">&#10148;</span></button></div>
+                            <small class="chat-sharing-note">Files you select are copied into this conversation (up to 10 MB). Only verified transformations can be shared.</small>
+                        </form>
+                        {% else %}
+                        <div class="chat-empty-state chat-select-state"><span class="report-mark" aria-hidden="true">CH</span><h2>Select a conversation</h2><p>Choose a chat or start a new one. Conversation messages and shared files are visible only to members.</p></div>
+                        {% endif %}
+                    </section>
+                </div>
+
+                {% elif page == 'admin' %}
                 <div class="page-heading">
                     <p class="eyebrow">ACCESS CONTROL / USERS</p>
                     <h1>User access</h1>
@@ -57,6 +226,36 @@
                 </div>
                 {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
                 {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
+
+                <details class="admin-add-user">
+                    <summary><span class="admin-add-user-icon" aria-hidden="true">+</span><span><strong>Add a user</strong><small>Create an account and choose its role.</small></span><span class="admin-add-user-chevron" aria-hidden="true">&#8964;</span></summary>
+                    <form class="admin-add-user-form" action="/admin/users/create" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <div class="admin-add-user-fields">
+                            <div class="admin-add-user-field">
+                                <label for="new-user-username">Username</label>
+                                <input id="new-user-username" name="username" type="text" minlength="3" maxlength="64" autocomplete="off" placeholder="Letters, numbers, _ or -" required>
+                            </div>
+                            <div class="admin-add-user-field">
+                                <label for="new-user-role">Role</label>
+                                <select id="new-user-role" name="role">
+                                    <option value="viewer" selected>Viewer</option>
+                                    <option value="analyst">Analyst</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                            <div class="admin-add-user-field">
+                                <label for="new-user-password">Initial password</label>
+                                <input id="new-user-password" name="password" type="password" minlength="12" autocomplete="new-password" required>
+                            </div>
+                            <div class="admin-add-user-field">
+                                <label for="new-user-password-confirmation">Confirm password</label>
+                                <input id="new-user-password-confirmation" name="password_confirmation" type="password" minlength="12" autocomplete="new-password" required>
+                            </div>
+                        </div>
+                        <div class="admin-add-user-footer"><small>At least 12 characters. The user can sign in with these credentials immediately.</small><button type="submit">Create account <span aria-hidden="true">&#8594;</span></button></div>
+                    </form>
+                </details>
 
                 <div class="user-stats" aria-label="User account totals">
                     <article class="user-stat-card"><span class="user-stat-mark">01</span><div><strong>{{ active_user_count }}</strong><span>Active accounts</span></div></article>
@@ -88,13 +287,17 @@
                 <section class="content-panel user-list-panel">
                     <div class="section-heading directory-heading">
                         <div><p class="eyebrow">DIRECTORY / {{ account_filter_label|upper }}</p><h2>{{ account_filter_label }}</h2><p class="directory-caption">Deregistered account data is permanently deleted after three months unless retained or restored.</p></div>
-                        <span class="panel-index">{{ users|length }}</span>
+                        <span class="panel-index">{{ "%02d"|format(users|length) }}</span>
                     </div>
                     {% if users %}
                     <div class="user-list">
                         {% for account in users %}
                         <div class="user-row">
+                            {% if account.profile_picture_mime_type %}
+                            <img class="user-avatar user-list-avatar" src="/admin/users/{{ account.id }}/profile-picture" alt="{{ account.username }} profile picture">
+                            {% else %}
                             <span class="user-avatar user-list-avatar">{{ account.username[0]|upper }}</span>
+                            {% endif %}
                             <span class="user-identity">
                                 <strong>{{ account.username }}{% if account.id == user_id %} (you){% endif %}</strong>
                                 <small>Joined {{ account.created_at[:10] }}</small>
@@ -110,6 +313,13 @@
                             </div>
                             {% if account.id != user_id and account.is_active %}
                             <div class="user-admin-actions" aria-label="Actions for {{ account.username }}">
+                                {% if account.role_name == 'viewer' %}
+                                <form action="/admin/users/{{ account.id }}/chat-access" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="intent" value="{{ 'revoke' if account.chat_enabled else 'grant' }}">
+                                    <button class="secondary-admin-action" type="submit">{{ 'Revoke chat' if account.chat_enabled else 'Grant chat' }}</button>
+                                </form>
+                                {% endif %}
                                 <form class="role-edit-form" action="/admin/users/{{ account.id }}/role" method="POST">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <label class="visually-hidden" for="role-{{ account.id }}">Role for {{ account.username }}</label>
@@ -131,6 +341,13 @@
                             </div>
                             {% elif not account.is_active %}
                             <div class="user-admin-actions archived-user-actions" aria-label="Retention actions for {{ account.username }}">
+                                {% if account.role_name == 'viewer' and account.chat_enabled %}
+                                <form action="/admin/users/{{ account.id }}/chat-access" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="intent" value="revoke">
+                                    <button class="secondary-admin-action" type="submit">Revoke chat</button>
+                                </form>
+                                {% endif %}
                                 <form action="/admin/users/{{ account.id }}/restore" method="POST" onsubmit="return confirm('Restore {{ account.username }} and cancel scheduled deletion?')">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <button type="submit">Restore account</button>
@@ -171,7 +388,7 @@
 
                 <div class="memory-grid">
                     <section class="content-panel memory-form-panel">
-                        <div class="section-heading"><div><p class="eyebrow">INTAKE / NEW SOURCE</p><h2>Upload a document</h2></div><span class="panel-index">01</span></div>
+                        <div class="section-heading"><div><p class="eyebrow">INTAKE / NEW SOURCE</p><h2>Upload a document</h2></div></div>
                         <p class="intake-note">Your source is saved in your workspace. Masking and data-diode processing require the ingestion service.</p>
                         <form class="memory-form" action="/dashboard/upload" method="POST" enctype="multipart/form-data">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -194,7 +411,7 @@
                 </div>
                 {% if uploaded_documents %}
                 <section class="content-panel submission-history" aria-labelledby="upload-history-title">
-                    <div class="section-heading"><div><p class="eyebrow">INTAKE HISTORY</p><h2 id="upload-history-title">Your recent submissions</h2></div><span class="panel-index">{{ uploaded_documents|length }}</span></div>
+                    <div class="section-heading"><div><p class="eyebrow">INTAKE HISTORY</p><h2 id="upload-history-title">Your recent submissions</h2></div><span class="panel-index">{{ "%02d"|format(uploaded_documents|length) }}</span></div>
                     <div class="submission-list">
                         {% for document in uploaded_documents %}
                         <article class="submission-row">
@@ -233,7 +450,7 @@
 
                 <div class="configure-grid">
                     <section class="content-panel configure-panel">
-                        <div class="section-heading"><div><p class="eyebrow">ACTIVE FILE</p><h2>{{ document.title }}</h2></div><span class="panel-index">01</span></div>
+                        <div class="section-heading"><div><p class="eyebrow">ACTIVE FILE</p><h2>{{ document.title }}</h2></div></div>
                         <form class="configure-form" id="executive-summary-form" action="/dashboard/upload/{{ document.id }}/generate" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="output_format" value="Executive Summary">
@@ -324,7 +541,7 @@
                 <section class="content-panel report-feed" aria-labelledby="report-feed-title">
                     <div class="section-heading">
                         <div><p class="eyebrow">DOCUMENT FEED</p><h2 id="report-feed-title">Transformations by document</h2></div>
-                        <span class="panel-index">{{ report_count }}</span>
+                        <span class="panel-index">{{ "%02d"|format(report_count) }}</span>
                     </div>
                     <p class="report-safety-note">Only verified, rehydrated content belongs here. Raw uploads and unverified model output are never shown in Reports.</p>
                     <div class="report-toolbar">
@@ -392,7 +609,7 @@
                 {% if error %}<p class="auth-message error-message" role="alert">{{ error }}</p>{% endif %}
                 {% if success %}<p class="auth-message success-message" role="status">{{ success }}</p>{% endif %}
                 <section class="content-panel profile-panel">
-                    <div class="section-heading profile-heading"><div><p class="eyebrow">YOUR ACCOUNT</p><h2>Profile settings</h2><p class="directory-caption">Keep your account details up to date.</p></div><span class="panel-index">01</span></div>
+                    <div class="section-heading profile-heading"><div><p class="eyebrow">YOUR ACCOUNT</p><h2>Profile settings</h2><p class="directory-caption">Keep your account details up to date.</p></div></div>
                     <form class="profile-form" action="/account/profile" method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <div class="profile-preview">
@@ -430,7 +647,7 @@
                 </section>
                 <div class="overview-grid">
                     <section class="content-panel access-panel">
-                        <div class="section-heading"><div><p class="eyebrow">YOUR ACCESS</p><h2>Permissions</h2></div><span class="panel-index">{{ permissions|length }}</span></div>
+                        <div class="section-heading"><div><p class="eyebrow">YOUR ACCESS</p><h2>Permissions</h2></div><span class="panel-index">{{ "%02d"|format(permissions|length) }}</span></div>
                         <ul class="permission-list">
                             {% for permission in permissions %}
                             <li><span class="permission-check">&#10003;</span><code>{{ permission }}</code></li>
@@ -445,8 +662,9 @@
                     </section>
                 </div>
                 <div class="overview-workspace-grid">
+                    {% if 'documents:upload' in permissions %}
                     <section class="content-panel overview-intake" aria-labelledby="overview-intake-title">
-                        <div class="section-heading"><div><p class="eyebrow">INTAKE / NEW SOURCE</p><h2 id="overview-intake-title">Upload a document</h2></div><span class="panel-index">01</span></div>
+                        <div class="section-heading"><div><p class="eyebrow">INTAKE / NEW SOURCE</p><h2 id="overview-intake-title">Upload a document</h2></div></div>
                         <p class="intake-note">Add a source to your private history. Masking and data-diode processing will run when the ingestion service is connected.</p>
                         <form class="ingest-form" action="/dashboard/upload" method="POST" enctype="multipart/form-data">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -462,8 +680,9 @@
                             <button type="submit">Save submission <span aria-hidden="true">&#8594;</span></button>
                         </form>
                     </section>
+                    {% endif %}
                     <section class="content-panel overview-history" aria-labelledby="overview-history-title">
-                        <div class="section-heading"><div><p class="eyebrow">INTAKE HISTORY</p><h2 id="overview-history-title">Your recent submissions</h2></div><span class="panel-index">{{ uploaded_documents|length }}</span></div>
+                        <div class="section-heading"><div><p class="eyebrow">INTAKE HISTORY</p><h2 id="overview-history-title">Your recent submissions</h2></div><span class="panel-index">{{ "%02d"|format(uploaded_documents|length) }}</span></div>
                         {% if uploaded_documents %}
                         <div class="submission-list">
                             {% for document in uploaded_documents %}
@@ -471,6 +690,7 @@
                                 <span class="submission-type" aria-hidden="true">{% if document.document_type == 'audio' %}AU{% elif document.document_type == 'video' %}VI{% elif document.document_type == 'scan' %}SC{% else %}DO{% endif %}</span>
                                 <div class="submission-copy"><strong>{{ document.title }}</strong><span>{{ document.original_name }}</span><small>{{ document.document_type|title }} · {{ document.created_at[:10] }}</small>{% if document.description %}<small>{{ document.description }}</small>{% endif %}</div>
                                 <span class="submission-status">Saved</span>
+                                {% if 'documents:upload' in permissions %}
                                 <div class="submission-actions">
                                     <a class="submission-open" href="/dashboard/upload/{{ document.id }}/configure" aria-label="Open details for {{ document.title }}">&#8594;</a>
                                     <form class="submission-delete-form" action="/dashboard/upload/{{ document.id }}/delete" method="POST" onsubmit="return confirm('Delete this uploaded file permanently?')">
@@ -478,6 +698,7 @@
                                         <button class="submission-delete" type="submit" aria-label="Delete {{ document.title }}">Delete</button>
                                     </form>
                                 </div>
+                                {% endif %}
                             </article>
                             {% endfor %}
                         </div>
@@ -513,5 +734,245 @@
             });
         }
     </script>
+    {% if page == 'chat' %}
+    <script>
+        const chatSearch = document.getElementById('chat-search');
+        const chatItems = Array.from(document.querySelectorAll('.chat-list-item'));
+        if (chatSearch) {
+            chatSearch.addEventListener('input', () => {
+                const query = chatSearch.value.trim().toLocaleLowerCase();
+                let visibleCount = 0;
+                chatItems.forEach((item) => {
+                    item.hidden = !item.dataset.chatSearch.includes(query);
+                    if (!item.hidden) visibleCount += 1;
+                });
+                const noResults = document.querySelector('.chat-no-results');
+                if (noResults) noResults.hidden = visibleCount > 0;
+            });
+        }
+
+        const chatCreateForm = document.querySelector('.chat-create-form');
+        const chatType = document.getElementById('chat-type');
+        const chatTitleField = document.querySelector('.chat-group-name-field');
+        const chatTitle = document.getElementById('chat-title');
+        const chatRecipientPicker = document.querySelector('.chat-recipient-picker');
+        const chatRecipients = chatRecipientPicker
+            ? Array.from(chatRecipientPicker.querySelectorAll('input[name="recipient_ids"]'))
+            : [];
+        const chatRecipientHint = document.querySelector('.chat-recipient-hint');
+        const chatRecipientSelection = document.querySelector('.chat-recipient-selection');
+        if (chatType && chatRecipients.length && chatTitleField && chatTitle && chatRecipientHint) {
+            const updateChatType = () => {
+                const isGroup = chatType.value === 'group';
+                chatTitleField.hidden = !isGroup;
+                chatTitle.required = isGroup;
+                chatRecipientHint.textContent = isGroup
+                    ? 'Choose at least two members for a group.'
+                    : 'Choose one person for a direct chat.';
+                chatRecipients.forEach((checkbox) => {
+                    checkbox.checked = false;
+                    checkbox.closest('.chat-recipient-option')?.classList.remove('selected');
+                });
+                updateRecipientSelection();
+            };
+            const updateRecipientSelection = () => {
+                const selected = chatRecipients.filter((checkbox) => checkbox.checked).length;
+                if (chatRecipientSelection) {
+                    chatRecipientSelection.textContent = selected
+                        ? `${selected} selected`
+                        : 'Select people';
+                }
+            };
+            chatRecipients.forEach((checkbox) => {
+                checkbox.addEventListener('change', () => {
+                    if (chatType.value === 'direct' && checkbox.checked) {
+                        chatRecipients.forEach((other) => {
+                            if (other !== checkbox) other.checked = false;
+                        });
+                    }
+                    chatRecipients.forEach((recipient) => {
+                        recipient.closest('.chat-recipient-option')
+                            ?.classList.toggle('selected', recipient.checked);
+                    });
+                    updateRecipientSelection();
+                });
+            });
+            chatType.addEventListener('change', updateChatType);
+            updateChatType();
+            chatCreateForm?.addEventListener('submit', (event) => {
+                const selectedCount = chatRecipients.filter((checkbox) => checkbox.checked).length;
+                const minimum = chatType.value === 'group' ? 2 : 1;
+                if (selectedCount < minimum) {
+                    event.preventDefault();
+                    chatRecipientPicker?.classList.add('invalid');
+                    chatRecipientHint.textContent = chatType.value === 'group'
+                        ? 'Select at least two people to create a group.'
+                        : 'Select one person to start a direct chat.';
+                    chatRecipientPicker?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
+                chatRecipientPicker?.classList.remove('invalid');
+            });
+        }
+        const chatNewConversation = document.querySelector('.chat-new-conversation');
+        const chatNewToggleMark = document.querySelector('.chat-new-toggle-mark');
+        if (chatNewConversation && chatNewToggleMark) {
+            const updateToggleMark = () => {
+                chatNewToggleMark.textContent = chatNewConversation.open ? '×' : '+';
+                chatNewConversation.querySelector('summary')?.setAttribute(
+                    'aria-label',
+                    chatNewConversation.open ? 'Close new conversation form' : 'Open new conversation form'
+                );
+            };
+            chatNewConversation.addEventListener('toggle', updateToggleMark);
+            updateToggleMark();
+        }
+
+        const chatComposer = document.getElementById('chat-message');
+        const chatCounter = document.getElementById('chat-character-count');
+        const chatSource = document.getElementById('chat-source');
+        const chatMessageForm = document.querySelector('.chat-message-form');
+        if (chatComposer && chatCounter) {
+            const updateComposer = () => {
+                chatComposer.style.height = 'auto';
+                chatComposer.style.height = `${Math.min(chatComposer.scrollHeight, 160)}px`;
+                chatCounter.textContent = `${chatComposer.value.length} / ${chatComposer.maxLength}`;
+            };
+            chatComposer.addEventListener('input', updateComposer);
+            chatComposer.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                    event.preventDefault();
+                    chatMessageForm?.requestSubmit();
+                }
+            });
+            updateComposer();
+        }
+        if (chatMessageForm) {
+            chatMessageForm.addEventListener('submit', (event) => {
+                if (!chatComposer?.value.trim() && !chatSource?.value) {
+                    event.preventDefault();
+                    chatComposer?.focus();
+                    return;
+                }
+                const sendButton = chatMessageForm.querySelector('button[type="submit"]');
+                if (sendButton) {
+                    sendButton.disabled = true;
+                    sendButton.textContent = 'Sending…';
+                }
+            });
+        }
+
+        const chatConversation = document.querySelector('.chat-conversation[data-chat-id]');
+        const chatMessageList = document.querySelector('.chat-message-list');
+        const liveStatus = document.getElementById('chat-live-status');
+        const chatUserId = {{ user_id }};
+        const scrollChatToBottom = () => {
+            if (chatMessageList) chatMessageList.scrollTop = chatMessageList.scrollHeight;
+        };
+        if (chatConversation && chatMessageList) {
+            scrollChatToBottom();
+            let latestMessageId = Number(chatConversation.dataset.latestMessage || 0);
+            const downloadAllowed = chatConversation.dataset.downloadAllowed === 'true';
+            const isGroupChat = chatConversation.dataset.chatType === 'group';
+            const appendChatMessage = (message) => {
+                const wasNearBottom = chatMessageList.scrollHeight - chatMessageList.scrollTop - chatMessageList.clientHeight < 90;
+                chatMessageList.querySelector('.chat-empty-state')?.remove();
+                const article = document.createElement('article');
+                article.className = `chat-message${message.sender_id === chatUserId ? ' own-message' : ''}`;
+                article.dataset.messageId = message.id;
+                if (isGroupChat && message.sender_id !== chatUserId) {
+                    const avatar = document.createElement('span');
+                    avatar.className = 'chat-message-avatar';
+                    avatar.setAttribute('aria-hidden', 'true');
+                    avatar.textContent = message.sender_name.slice(0, 1).toUpperCase();
+                    article.appendChild(avatar);
+                }
+                const content = document.createElement('div');
+                content.className = 'chat-message-content';
+                const meta = document.createElement('div');
+                meta.className = 'chat-message-meta';
+                const sender = document.createElement('strong');
+                sender.textContent = message.sender_name;
+                const time = document.createElement('time');
+                time.dateTime = message.created_at;
+                time.textContent = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                meta.append(sender, time);
+                content.appendChild(meta);
+                if (message.body) {
+                    const body = document.createElement('p');
+                    body.textContent = message.body;
+                    content.appendChild(body);
+                }
+                message.attachments.forEach((attachment) => {
+                    const file = document.createElement('div');
+                    file.className = 'chat-attachment';
+                    const icon = document.createElement('span');
+                    icon.className = 'chat-attachment-icon';
+                    icon.setAttribute('aria-hidden', 'true');
+                    icon.textContent = '▤';
+                    const details = document.createElement('span');
+                    const fileName = document.createElement('strong');
+                    fileName.textContent = attachment.file_name;
+                    const fileInfo = document.createElement('small');
+                    fileInfo.textContent = `${attachment.source_type.replace('-', ' ')} · ${(attachment.size_bytes / 1024).toFixed(1)} KB`;
+                    details.append(fileName, fileInfo);
+                    const preview = document.createElement('a');
+                    preview.href = `/chat/attachments/${attachment.id}`;
+                    preview.target = '_blank';
+                    preview.rel = 'noopener noreferrer';
+                    preview.textContent = 'Preview';
+                    file.append(icon, details, preview);
+                    if (downloadAllowed) {
+                        const save = document.createElement('a');
+                        save.href = `/chat/attachments/${attachment.id}?download=1`;
+                        save.textContent = 'Save';
+                        file.appendChild(save);
+                    }
+                    content.appendChild(file);
+                });
+                article.appendChild(content);
+                chatMessageList.appendChild(article);
+                latestMessageId = Math.max(latestMessageId, message.id);
+                chatConversation.dataset.latestMessage = String(latestMessageId);
+                if (wasNearBottom) scrollChatToBottom();
+            };
+            let polling = false;
+            let updateTimer = 0;
+            const refreshChat = async () => {
+                if (polling || document.hidden) return;
+                polling = true;
+                try {
+                    const response = await fetch(`/chat/api/${chatConversation.dataset.chatId}/updates?after=${latestMessageId}`, {
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        headers: { Accept: 'application/json' }
+                    });
+                    if ([401, 403, 404].includes(response.status)) {
+                        window.clearInterval(updateTimer);
+                        if (liveStatus) {
+                            liveStatus.textContent = 'Access changed';
+                            liveStatus.title = 'Refresh the page to check your conversation access.';
+                        }
+                        return;
+                    }
+                    if (!response.ok) throw new Error('Chat updates are unavailable.');
+                    const update = await response.json();
+                    update.messages.forEach(appendChatMessage);
+                    liveStatus?.classList.remove('disconnected');
+                    if (liveStatus) liveStatus.title = 'Connected. New messages appear automatically.';
+                } catch {
+                    liveStatus?.classList.add('disconnected');
+                    if (liveStatus) liveStatus.title = 'Connection interrupted. Retrying automatically.';
+                } finally {
+                    polling = false;
+                }
+            };
+            updateTimer = window.setInterval(refreshChat, 5000);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) refreshChat();
+            });
+        }
+    </script>
+    {% endif %}
 </body>
 </html>

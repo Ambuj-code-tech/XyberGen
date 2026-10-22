@@ -72,7 +72,8 @@ The current repository contains the initial working application and focuses on t
 4. **Document, scan, audio, and video intake**
 5. **Submission history and report management**
 6. **Generated-output tracking**
-7. **SQLite-based persistence**
+7. **Private direct and group chat** with admin-granted Viewer access and member-scoped file sharing
+8. **SQLite-based persistence**
    > **Note:** SQLite-based persistence may be changed to PostgreSQL.
 9. **Hashed session tokens and session expiry**
 10. **CSRF protection** for authentication and account-management operations

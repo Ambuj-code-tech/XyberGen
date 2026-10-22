@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, AsyncGenerator, Iterator
+from urllib.parse import quote
 from xml.sax.saxutils import escape
 
 import uvicorn
@@ -39,12 +40,15 @@ LOGIN_CSRF_COOKIE = "xybergen_login_csrf"
 SESSION_LIFETIME = timedelta(hours=8)
 PASSWORD_ITERATIONS = 600_000
 MAX_PROFILE_PICTURE_BYTES = 2 * 1024 * 1024
+MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024
+MAX_CHAT_MESSAGE_LENGTH = 4000
+MAX_CHAT_MEMBERS = 20
 ACCOUNT_RETENTION_MONTHS = 3
 ACCOUNT_CLEANUP_INTERVAL_SECONDS = 60 * 60
 LOGGER = logging.getLogger(__name__)
 ROLE_PERMISSIONS = {
-    "admin": {"dashboard:view", "reports:view", "users:manage"},
-    "analyst": {"dashboard:view", "reports:view"},
+    "admin": {"dashboard:view", "documents:upload", "reports:view", "users:manage", "chat:access"},
+    "analyst": {"dashboard:view", "documents:upload", "reports:view", "chat:access"},
     "viewer": {"dashboard:view"},
 }
 ADMIN_USER_FILTERS = {
@@ -286,6 +290,45 @@ def initialize_database() -> None:
                 is_rehydrated INTEGER NOT NULL DEFAULT 0 CHECK(is_rehydrated IN (0, 1)),
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS chat_access_grants (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                granted_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chats (
+                id INTEGER PRIMARY KEY,
+                chat_type TEXT NOT NULL CHECK(chat_type IN ('direct', 'group')),
+                title TEXT NOT NULL DEFAULT '',
+                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_members (
+                chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                joined_at TEXT NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            );
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY,
+                chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+                sender_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                body TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_attachments (
+                id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+                shared_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                file_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                file_data BLOB NOT NULL,
+                source_type TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS chat_members_user_idx ON chat_members(user_id, chat_id);
+            CREATE INDEX IF NOT EXISTS chat_messages_chat_idx ON chat_messages(chat_id, id);
             """
         )
         for role, permissions in ROLE_PERMISSIONS.items():
@@ -453,6 +496,71 @@ def user_has_permission(user_id: int, permission: str) -> bool:
     return result is not None
 
 
+def user_can_chat(user_id: int) -> bool:
+    if user_has_permission(user_id, "chat:access"):
+        return True
+    with get_connection() as connection:
+        grant = connection.execute(
+            """SELECT 1 FROM chat_access_grants
+               JOIN users ON users.id = chat_access_grants.user_id
+               WHERE users.id = ? AND users.is_active = 1 AND users.is_suspended = 0""",
+            (user_id,),
+        ).fetchone()
+    return grant is not None
+
+
+def get_chat_sources(user_id: int) -> list[dict[str, Any]]:
+    with get_connection() as connection:
+        documents = connection.execute(
+            """SELECT id, title, original_name, mime_type, size_bytes
+               FROM uploaded_documents WHERE user_id = ?
+               ORDER BY created_at DESC, id DESC LIMIT 100""",
+            (user_id,),
+        ).fetchall()
+        outputs = connection.execute(
+            """SELECT id, title, output_format, created_at
+               FROM generated_outputs
+               WHERE user_id = ? AND is_verified = 1 AND is_rehydrated = 1
+               ORDER BY created_at DESC, id DESC LIMIT 100""",
+            (user_id,),
+        ).fetchall()
+        reports = connection.execute(
+            """SELECT id, title, category, created_at
+               FROM verified_reports
+               WHERE user_id = ? AND is_verified = 1 AND is_rehydrated = 1
+               ORDER BY created_at DESC, id DESC LIMIT 100""",
+            (user_id,),
+        ).fetchall()
+    sources = [
+        {
+            "key": f"document:{row['id']}",
+            "label": f"Document: {row['title']} ({row['original_name']})",
+            "source_type": "document",
+            "source_id": row["id"],
+        }
+        for row in documents
+    ]
+    sources.extend(
+        {
+            "key": f"output:{row['id']}",
+            "label": f"Verified {row['output_format']}: {row['title']}",
+            "source_type": "output",
+            "source_id": row["id"],
+        }
+        for row in outputs
+    )
+    sources.extend(
+        {
+            "key": f"report:{row['id']}",
+            "label": f"Verified {row['category']}: {row['title']}",
+            "source_type": "report",
+            "source_id": row["id"],
+        }
+        for row in reports
+    )
+    return sources
+
+
 def render_template(
     request: Request,
     name: str,
@@ -493,9 +601,15 @@ def user_context(request: Request, user: sqlite3.Row) -> dict[str, Any]:
         if user["role_name"] == "admin":
             users = connection.execute(
                 """SELECT users.id, users.username, users.role_name, users.created_at,
+                          users.profile_picture_mime_type,
                           users.is_active, users.is_suspended, users.deregistered_at,
-                          users.purge_after, users.keep_data
-                   FROM users ORDER BY users.is_active DESC, users.username COLLATE NOCASE"""
+                          users.purge_after, users.keep_data,
+                          CASE WHEN users.role_name IN ('admin', 'analyst') THEN 1
+                               WHEN chat_access_grants.user_id IS NOT NULL THEN 1
+                               ELSE 0 END AS chat_enabled
+                   FROM users
+                   LEFT JOIN chat_access_grants ON chat_access_grants.user_id = users.id
+                   ORDER BY users.is_active DESC, users.username COLLATE NOCASE"""
             ).fetchall()
         permissions = connection.execute(
             """SELECT permission_name FROM role_permissions
@@ -507,6 +621,7 @@ def user_context(request: Request, user: sqlite3.Row) -> dict[str, Any]:
         "user_id": user["id"],
         "username": user["username"],
         "role": user["role_name"],
+        "can_chat": user_can_chat(user["id"]),
         "has_profile_picture": bool(user["profile_picture_mime_type"]),
         "permissions": [row["permission_name"] for row in permissions],
         "users": users if user["role_name"] == "admin" else [],
@@ -837,6 +952,28 @@ async def get_profile_picture(request: Request):
     )
 
 
+@app.get("/admin/users/{target_user_id}/profile-picture")
+async def get_user_profile_picture(target_user_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return Response(status_code=401)
+    if not user_has_permission(session[0]["id"], "users:manage"):
+        return Response(status_code=403)
+    with get_connection() as connection:
+        profile = connection.execute(
+            """SELECT profile_picture, profile_picture_mime_type
+               FROM users WHERE id = ?""",
+            (target_user_id,),
+        ).fetchone()
+    if not profile or not profile["profile_picture"] or not profile["profile_picture_mime_type"]:
+        return Response(status_code=404)
+    return Response(
+        content=profile["profile_picture"],
+        media_type=profile["profile_picture_mime_type"],
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @app.post("/account/profile")
 async def update_profile(request: Request):
     session = get_user_session(request)
@@ -923,8 +1060,8 @@ async def upload_dashboard(request: Request):
     if not session:
         return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
     user = session[0]
-    if not user_has_permission(user["id"], "dashboard:view"):
-        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+    if not user_has_permission(user["id"], "documents:upload"):
+        return HTMLResponse("You do not have permission to upload documents.", status_code=403)
     context = user_context(request, user)
     context.update({
         "page": "upload",
@@ -946,8 +1083,8 @@ async def save_uploaded_document(request: Request):
     if not session:
         return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
     user = session[0]
-    if not user_has_permission(user["id"], "dashboard:view"):
-        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+    if not user_has_permission(user["id"], "documents:upload"):
+        return HTMLResponse("You do not have permission to upload documents.", status_code=403)
 
     form = await request.form()
     if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
@@ -1012,8 +1149,8 @@ async def delete_uploaded_document(document_id: int, request: Request):
     if not session:
         return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
     user = session[0]
-    if not user_has_permission(user["id"], "dashboard:view"):
-        return HTMLResponse("You do not have permission to delete this document.", status_code=403)
+    if not user_has_permission(user["id"], "documents:upload"):
+        return HTMLResponse("You do not have permission to manage uploaded documents.", status_code=403)
 
     form = await request.form()
     if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
@@ -1035,8 +1172,8 @@ async def configure_uploaded_document(document_id: int, request: Request):
     if not session:
         return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
     user = session[0]
-    if not user_has_permission(user["id"], "dashboard:view"):
-        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+    if not user_has_permission(user["id"], "documents:upload"):
+        return HTMLResponse("You do not have permission to manage uploaded documents.", status_code=403)
 
     with get_connection() as connection:
         document = connection.execute(
@@ -1069,8 +1206,8 @@ async def save_document_output_options(document_id: int, request: Request):
     if not session:
         return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
     user = session[0]
-    if not user_has_permission(user["id"], "dashboard:view"):
-        return HTMLResponse("You do not have permission to view this page.", status_code=403)
+    if not user_has_permission(user["id"], "documents:upload"):
+        return HTMLResponse("You do not have permission to manage uploaded documents.", status_code=403)
 
     form = await request.form()
     if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
@@ -1125,7 +1262,7 @@ async def generate_document_output_for_user(document_id: int, request: Request):
     if not session:
         return JSONResponse({"error": "Sign in to continue."}, status_code=401)
     user = session[0]
-    if not user_has_permission(user["id"], "dashboard:view"):
+    if not user_has_permission(user["id"], "documents:upload"):
         return JSONResponse({"error": "Permission denied."}, status_code=403)
 
     form = await request.form()
@@ -1268,6 +1405,434 @@ async def save_memory_document(request: Request):
     return await save_uploaded_document(request)
 
 
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_can_chat(user["id"]):
+        return HTMLResponse("Chat access has not been granted to this account.", status_code=403)
+
+    with get_connection() as connection:
+        available_users = connection.execute(
+            """SELECT u.id, u.username, u.role_name
+               FROM users u
+               WHERE u.id != ? AND u.is_active = 1 AND u.is_suspended = 0
+                 AND (
+                     EXISTS (
+                         SELECT 1 FROM role_permissions rp
+                         WHERE rp.role_name = u.role_name
+                           AND rp.permission_name = 'chat:access'
+                     )
+                     OR EXISTS (
+                         SELECT 1 FROM chat_access_grants g WHERE g.user_id = u.id
+                     )
+                 )
+               ORDER BY u.username COLLATE NOCASE""",
+            (user["id"],),
+        ).fetchall()
+        chats = connection.execute(
+            """SELECT c.id, c.chat_type, c.title, c.created_by, c.created_at,
+                      (SELECT m.body FROM chat_messages m
+                       WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_message,
+                      (SELECT m.created_at FROM chat_messages m
+                       WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_message_at
+               FROM chats c
+               JOIN chat_members mine ON mine.chat_id = c.id AND mine.user_id = ?
+               ORDER BY COALESCE(last_message_at, c.created_at) DESC, c.id DESC""",
+            (user["id"],),
+        ).fetchall()
+        chat_list = []
+        for chat in chats:
+            names = connection.execute(
+                """SELECT u.username FROM chat_members cm
+                   JOIN users u ON u.id = cm.user_id
+                   WHERE cm.chat_id = ? AND cm.user_id != ?
+                   ORDER BY u.username COLLATE NOCASE""",
+                (chat["id"], user["id"]),
+            ).fetchall()
+            chat_list.append({
+                **dict(chat),
+                "display_title": chat["title"] if chat["chat_type"] == "group"
+                    else (", ".join(row["username"] for row in names) or "Direct chat"),
+                "participant_names": ", ".join(row["username"] for row in names),
+            })
+
+        selected_chat_id = request.query_params.get("chat_id", "")
+        selected_chat = None
+        messages: list[dict[str, Any]] = []
+        member_ids: set[int] = set()
+        if selected_chat_id.isdigit():
+            selected_chat = connection.execute(
+                """SELECT c.id, c.chat_type, c.title, c.created_by, c.created_at
+                   FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
+                   WHERE c.id = ? AND cm.user_id = ?""",
+                (int(selected_chat_id), user["id"]),
+            ).fetchone()
+            if not selected_chat:
+                return HTMLResponse("Conversation not found.", status_code=404)
+        if selected_chat:
+            member_rows = connection.execute(
+                """SELECT u.id, u.username, u.role_name
+                   FROM chat_members cm JOIN users u ON u.id = cm.user_id
+                   WHERE cm.chat_id = ? ORDER BY u.username COLLATE NOCASE""",
+                (selected_chat["id"],),
+            ).fetchall()
+            member_ids = {row["id"] for row in member_rows}
+            rows = connection.execute(
+                """SELECT m.id, m.sender_id, COALESCE(u.username, 'Former user') AS sender_name,
+                          m.body, m.created_at
+                   FROM chat_messages m LEFT JOIN users u ON u.id = m.sender_id
+                   WHERE m.chat_id = ? ORDER BY m.id DESC LIMIT 100""",
+                (selected_chat["id"],),
+            ).fetchall()
+            messages = [dict(row) for row in reversed(rows)]
+            if messages:
+                message_ids = [message["id"] for message in messages]
+                placeholders = ",".join("?" for _ in message_ids)
+                attachments = connection.execute(
+                    f"""SELECT id, message_id, file_name, mime_type, size_bytes, source_type
+                        FROM chat_attachments WHERE message_id IN ({placeholders})
+                        ORDER BY id""",
+                    message_ids,
+                ).fetchall()
+                by_message: dict[int, list[dict[str, Any]]] = {}
+                for attachment in attachments:
+                    by_message.setdefault(attachment["message_id"], []).append(dict(attachment))
+                for message in messages:
+                    message["attachments"] = by_message.get(message["id"], [])
+            else:
+                for message in messages:
+                    message["attachments"] = []
+            selected_chat = {
+                **dict(selected_chat),
+                "participant_names": ", ".join(row["username"] for row in member_rows),
+                "members": [dict(row) for row in member_rows],
+                "is_manager": user["role_name"] == "admin" or selected_chat["created_by"] == user["id"],
+            }
+
+    context = user_context(request, user)
+    context.update({
+        "page": "chat",
+        "can_chat": True,
+        "chat_users": [dict(row) for row in available_users],
+        "chat_available_users": [
+            dict(row) for row in available_users if row["id"] not in member_ids
+        ],
+        "chats": chat_list,
+        "selected_chat": selected_chat,
+        "chat_member_ids": member_ids,
+        "messages": messages,
+        "chat_sources": get_chat_sources(user["id"]),
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+        "chat_message_limit": MAX_CHAT_MESSAGE_LENGTH,
+    })
+    response = render_template(request, "dashboard.html", context)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.post("/chat/create")
+async def create_chat(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_can_chat(user["id"]):
+        return HTMLResponse("Chat access has not been granted to this account.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    chat_type = str(form.get("chat_type", "direct")).strip().lower()
+    title = str(form.get("title", "")).strip()
+    if chat_type not in {"direct", "group"}:
+        return RedirectResponse("/chat?error=Choose+a+valid+chat+type", status_code=303)
+    if len(title) > 80 or (chat_type == "group" and not title):
+        return RedirectResponse("/chat?error=Group+names+must+be+1-80+characters", status_code=303)
+    try:
+        recipient_ids = sorted({int(value) for value in form.getlist("recipient_ids")})
+    except (TypeError, ValueError):
+        return RedirectResponse("/chat?error=Choose+valid+chat+members", status_code=303)
+    minimum_recipients = 1 if chat_type == "direct" else 2
+    if (
+        len(recipient_ids) < minimum_recipients
+        or (chat_type == "direct" and len(recipient_ids) != 1)
+        or len(recipient_ids) + 1 > MAX_CHAT_MEMBERS
+        or user["id"] in recipient_ids
+    ):
+        return RedirectResponse("/chat?error=Choose+valid+chat+members", status_code=303)
+    if any(not user_can_chat(recipient_id) for recipient_id in recipient_ids):
+        return RedirectResponse("/chat?error=Every+member+must+have+chat+access", status_code=303)
+
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as connection:
+        if chat_type == "direct":
+            existing = connection.execute(
+                """SELECT c.id FROM chats c
+                   WHERE c.chat_type = 'direct'
+                     AND (SELECT COUNT(*) FROM chat_members cm WHERE cm.chat_id = c.id) = 2
+                     AND EXISTS (SELECT 1 FROM chat_members cm
+                                 WHERE cm.chat_id = c.id AND cm.user_id = ?)
+                     AND EXISTS (SELECT 1 FROM chat_members cm
+                                 WHERE cm.chat_id = c.id AND cm.user_id = ?)""",
+                (user["id"], recipient_ids[0]),
+            ).fetchone()
+            if existing:
+                return RedirectResponse(f"/chat?chat_id={existing['id']}", status_code=303)
+        cursor = connection.execute(
+            "INSERT INTO chats (chat_type, title, created_by, created_at) VALUES (?, ?, ?, ?)",
+            (chat_type, title if chat_type == "group" else "", user["id"], now),
+        )
+        chat_id = cursor.lastrowid
+        connection.executemany(
+            """INSERT INTO chat_members (chat_id, user_id, added_by, joined_at)
+               VALUES (?, ?, ?, ?)""",
+            [(chat_id, member_id, user["id"], now) for member_id in [user["id"], *recipient_ids]],
+        )
+    return RedirectResponse(f"/chat?chat_id={chat_id}", status_code=303)
+
+
+@app.get("/chat/api/{chat_id}/updates")
+async def get_chat_updates(chat_id: int, request: Request, after: int = 0):
+    session = get_user_session(request)
+    if not session:
+        return JSONResponse({"error": "Sign in to continue."}, status_code=401)
+    user = session[0]
+    if not user_can_chat(user["id"]):
+        return JSONResponse({"error": "Chat access is not enabled."}, status_code=403)
+    if after < 0:
+        return JSONResponse({"error": "Invalid message cursor."}, status_code=400)
+    with get_connection() as connection:
+        member = connection.execute(
+            "SELECT 1 FROM chat_members WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user["id"]),
+        ).fetchone()
+        if not member:
+            return JSONResponse({"error": "Conversation not found."}, status_code=404)
+        messages = connection.execute(
+            """SELECT m.id, m.sender_id, COALESCE(u.username, 'Former user') AS sender_name,
+                      m.body, m.created_at
+               FROM chat_messages m LEFT JOIN users u ON u.id = m.sender_id
+               WHERE m.chat_id = ? AND m.id > ?
+               ORDER BY m.id LIMIT 100""",
+            (chat_id, after),
+        ).fetchall()
+        result = []
+        for message in messages:
+            attachments = connection.execute(
+                """SELECT id, file_name, mime_type, size_bytes, source_type
+                   FROM chat_attachments WHERE message_id = ? ORDER BY id""",
+                (message["id"],),
+            ).fetchall()
+            result.append({
+                **dict(message),
+                "attachments": [dict(attachment) for attachment in attachments],
+            })
+    response = JSONResponse({"messages": result})
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.post("/chat/{chat_id}/messages")
+async def send_chat_message(chat_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_can_chat(user["id"]):
+        return HTMLResponse("Chat access has not been granted to this account.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    body = str(form.get("body", "")).strip()
+    source_key = str(form.get("source_key", "")).strip()
+    if len(body) > MAX_CHAT_MESSAGE_LENGTH:
+        return RedirectResponse(f"/chat?chat_id={chat_id}&error=Messages+must+be+{MAX_CHAT_MESSAGE_LENGTH}+characters+or+less", status_code=303)
+    if not body and not source_key:
+        return RedirectResponse(f"/chat?chat_id={chat_id}&error=Write+a+message+or+choose+a+file", status_code=303)
+
+    with get_connection() as connection:
+        member = connection.execute(
+            """SELECT 1 FROM chat_members
+               WHERE chat_id = ? AND user_id = ?""",
+            (chat_id, user["id"]),
+        ).fetchone()
+        if not member:
+            return HTMLResponse("You are not a member of this conversation.", status_code=403)
+
+        attachment_data = None
+        if source_key:
+            try:
+                source_type, source_id_text = source_key.split(":", 1)
+                source_id = int(source_id_text)
+            except (ValueError, TypeError):
+                return RedirectResponse(f"/chat?chat_id={chat_id}&error=Choose+a+valid+file", status_code=303)
+            if source_type == "document":
+                source = connection.execute(
+                    """SELECT original_name, mime_type, size_bytes, length(file_data) AS file_size
+                       FROM uploaded_documents WHERE id = ? AND user_id = ?""",
+                    (source_id, user["id"]),
+                ).fetchone()
+                if not source:
+                    return RedirectResponse(f"/chat?chat_id={chat_id}&error=That+document+is+not+available+to+you", status_code=303)
+                if source["file_size"] > MAX_CHAT_ATTACHMENT_BYTES:
+                    return RedirectResponse(f"/chat?chat_id={chat_id}&error=Shared+files+must+be+10+MB+or+smaller", status_code=303)
+                file_data = connection.execute(
+                    "SELECT file_data FROM uploaded_documents WHERE id = ? AND user_id = ?",
+                    (source_id, user["id"]),
+                ).fetchone()["file_data"]
+                mime_type = (
+                    source["mime_type"]
+                    if source["mime_type"] in ALLOWED_UPLOAD_MIME_TYPES
+                    else "application/octet-stream"
+                )
+                attachment_data = (
+                    source["original_name"], mime_type, source["file_size"],
+                    file_data, "uploaded-document",
+                )
+            elif source_type in {"output", "report"}:
+                table = "generated_outputs" if source_type == "output" else "verified_reports"
+                source = connection.execute(
+                    f"""SELECT title, content FROM {table}
+                        WHERE id = ? AND user_id = ? AND is_verified = 1 AND is_rehydrated = 1""",
+                    (source_id, user["id"]),
+                ).fetchone()
+                if not source:
+                    return RedirectResponse(f"/chat?chat_id={chat_id}&error=Only+verified+transformed+files+can+be+shared", status_code=303)
+                if len(source["content"].encode("utf-8")) > MAX_CHAT_ATTACHMENT_BYTES:
+                    return RedirectResponse(f"/chat?chat_id={chat_id}&error=Shared+files+must+be+10+MB+or+smaller", status_code=303)
+                pdf_data = build_summary_pdf(
+                    escape(source["title"]),
+                    escape(source["content"]),
+                )
+                safe_stem = "".join(
+                    character if character.isalnum() or character in "-_" else "-"
+                    for character in source["title"]
+                ).strip("-_")[:80] or "transformed-file"
+                attachment_data = (
+                    f"{safe_stem}.pdf", "application/pdf", len(pdf_data), pdf_data,
+                    "transformed-output",
+                )
+            else:
+                return RedirectResponse(f"/chat?chat_id={chat_id}&error=Choose+a+valid+file", status_code=303)
+            if attachment_data[2] > MAX_CHAT_ATTACHMENT_BYTES:
+                return RedirectResponse(f"/chat?chat_id={chat_id}&error=Shared+files+must+be+10+MB+or+smaller", status_code=303)
+
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = connection.execute(
+            """INSERT INTO chat_messages (chat_id, sender_id, body, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (chat_id, user["id"], body, now),
+        )
+        if attachment_data:
+            connection.execute(
+                """INSERT INTO chat_attachments
+                   (message_id, shared_by, file_name, mime_type, size_bytes, file_data,
+                    source_type, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cursor.lastrowid, user["id"], *attachment_data, now),
+            )
+    return RedirectResponse(f"/chat?chat_id={chat_id}", status_code=303)
+
+
+@app.post("/chat/{chat_id}/members")
+async def manage_chat_member(chat_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    user = session[0]
+    if not user_can_chat(user["id"]):
+        return HTMLResponse("Chat access has not been granted to this account.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+    try:
+        target_user_id = int(str(form.get("user_id", "")))
+    except ValueError:
+        return RedirectResponse(f"/chat?chat_id={chat_id}&error=Choose+a+valid+member", status_code=303)
+    intent = str(form.get("intent", "")).strip()
+    with get_connection() as connection:
+        chat = connection.execute(
+            """SELECT c.chat_type, c.created_by
+               FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
+               WHERE c.id = ? AND cm.user_id = ?""",
+            (chat_id, user["id"]),
+        ).fetchone()
+        if not chat or chat["chat_type"] != "group":
+            return HTMLResponse("Group chat not found.", status_code=404)
+        if user["role_name"] != "admin" and chat["created_by"] != user["id"]:
+            return HTMLResponse("Only the group creator or an admin can manage members.", status_code=403)
+        if intent == "add":
+            if not user_can_chat(target_user_id):
+                return RedirectResponse(f"/chat?chat_id={chat_id}&error=That+user+does+not+have+chat+access", status_code=303)
+            eligible = connection.execute(
+                """SELECT 1 FROM users WHERE id = ? AND is_active = 1 AND is_suspended = 0""",
+                (target_user_id,),
+            ).fetchone()
+            count = connection.execute(
+                "SELECT COUNT(*) FROM chat_members WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()[0]
+            if not eligible or count >= MAX_CHAT_MEMBERS:
+                return RedirectResponse(f"/chat?chat_id={chat_id}&error=Cannot+add+that+member", status_code=303)
+            connection.execute(
+                """INSERT OR IGNORE INTO chat_members
+                   (chat_id, user_id, added_by, joined_at) VALUES (?, ?, ?, ?)""",
+                (chat_id, target_user_id, user["id"], datetime.now(timezone.utc).isoformat()),
+            )
+        elif intent == "remove":
+            if target_user_id == user["id"] and chat["created_by"] == user["id"]:
+                return RedirectResponse(f"/chat?chat_id={chat_id}&error=Group+creators+cannot+leave+their+own+group", status_code=303)
+            connection.execute(
+                "DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?",
+                (chat_id, target_user_id),
+            )
+        else:
+            return RedirectResponse(f"/chat?chat_id={chat_id}&error=Choose+a+valid+member+action", status_code=303)
+    return RedirectResponse(f"/chat?chat_id={chat_id}", status_code=303)
+
+
+@app.get("/chat/attachments/{attachment_id}")
+async def get_chat_attachment(attachment_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return Response(status_code=401)
+    user = session[0]
+    if not user_can_chat(user["id"]):
+        return Response(status_code=403)
+    with get_connection() as connection:
+        attachment = connection.execute(
+            """SELECT a.file_name, a.mime_type, a.file_data
+               FROM chat_attachments a
+               JOIN chat_messages m ON m.id = a.message_id
+               JOIN chat_members cm ON cm.chat_id = m.chat_id
+               WHERE a.id = ? AND cm.user_id = ?""",
+            (attachment_id, user["id"]),
+        ).fetchone()
+    if not attachment:
+        return Response(status_code=404)
+    download = request.query_params.get("download") == "1"
+    if download and user["role_name"] not in {"admin", "analyst"}:
+        return Response(status_code=403)
+    disposition = "attachment" if download else "inline"
+    filename = quote(attachment["file_name"], safe="")
+    response = Response(
+        content=attachment["file_data"],
+        media_type=attachment["mime_type"],
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+    )
+    return response
+
+
 @app.get("/reports", response_class=HTMLResponse)
 async def reports(request: Request):
     session = get_user_session(request)
@@ -1370,6 +1935,109 @@ async def admin_users(request: Request):
         "retained_data_count": filter_counts["retained"],
     })
     return render_template(request, "dashboard.html", context)
+
+
+@app.post("/admin/users/{target_user_id}/chat-access")
+async def update_user_chat_access(target_user_id: int, request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    actor = session[0]
+    if not user_has_permission(actor["id"], "users:manage"):
+        return HTMLResponse("Administrator permission is required.", status_code=403)
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+    intent = str(form.get("intent", "")).strip()
+    if intent not in {"grant", "revoke"}:
+        return RedirectResponse("/admin/users?error=Choose+a+valid+chat+access+action", status_code=303)
+    with get_connection() as connection:
+        target = connection.execute(
+            """SELECT role_name, is_active, is_suspended FROM users WHERE id = ?""",
+            (target_user_id,),
+        ).fetchone()
+        if not target or target["role_name"] != "viewer":
+            return RedirectResponse("/admin/users?error=Chat+access+grants+are+only+for+viewers", status_code=303)
+        if intent == "grant" and (not target["is_active"] or target["is_suspended"]):
+            return RedirectResponse("/admin/users?error=Only+active+viewers+can+receive+chat+access", status_code=303)
+        if intent == "grant":
+            connection.execute(
+                """INSERT INTO chat_access_grants (user_id, granted_by, granted_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                       granted_by = excluded.granted_by,
+                       granted_at = excluded.granted_at""",
+                (target_user_id, actor["id"], datetime.now(timezone.utc).isoformat()),
+            )
+        else:
+            connection.execute(
+                "DELETE FROM chat_access_grants WHERE user_id = ?",
+                (target_user_id,),
+            )
+            connection.execute(
+                "DELETE FROM chat_members WHERE user_id = ?",
+                (target_user_id,),
+            )
+    action = "granted" if intent == "grant" else "revoked"
+    return RedirectResponse(f"/admin/users?success=Chat+access+{action}", status_code=303)
+
+
+@app.post("/admin/users/create")
+async def create_user_by_admin(request: Request):
+    session = get_user_session(request)
+    if not session:
+        return RedirectResponse("/?error=Sign+in+to+continue", status_code=303)
+    actor = session[0]
+    if not user_has_permission(actor["id"], "users:manage"):
+        return HTMLResponse("Administrator permission is required.", status_code=403)
+
+    form = await request.form()
+    if not csrf_is_valid(request, str(form.get("csrf_token", ""))):
+        return HTMLResponse("Invalid request token.", status_code=403)
+
+    username = str(form.get("username", "")).strip()
+    password = str(form.get("password", ""))
+    password_confirmation = str(form.get("password_confirmation", ""))
+    role_name = str(form.get("role", "viewer")).strip().lower()
+    if not valid_username(username):
+        return RedirectResponse(
+            "/admin/users?error=Use+3-64+letters,+numbers,+underscores,+or+hyphens",
+            status_code=303,
+        )
+    if len(password) < 12:
+        return RedirectResponse(
+            "/admin/users?error=Password+must+contain+at+least+12+characters",
+            status_code=303,
+        )
+    if password != password_confirmation:
+        return RedirectResponse(
+            "/admin/users?error=Passwords+do+not+match",
+            status_code=303,
+        )
+    if role_name not in ROLE_PERMISSIONS:
+        return RedirectResponse("/admin/users?error=Choose+a+valid+role", status_code=303)
+
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                """INSERT INTO users (username, password_hash, role_name, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    username,
+                    hash_password(password),
+                    role_name,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+    except sqlite3.IntegrityError:
+        return RedirectResponse(
+            "/admin/users?error=That+username+is+already+in+use",
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/admin/users?success=Account+created+with+the+selected+role",
+        status_code=303,
+    )
 
 
 @app.post("/admin/users/{target_user_id}/role")

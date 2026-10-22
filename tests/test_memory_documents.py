@@ -20,7 +20,7 @@ class MemoryDocumentFlowTests(unittest.TestCase):
 
         with sqlite3.connect(main.DATABASE_PATH) as connection:
             connection.execute(
-                "INSERT INTO users (username, password_hash, role_name, created_at) VALUES (?, ?, 'viewer', ?)",
+                "INSERT INTO users (username, password_hash, role_name, created_at) VALUES (?, ?, 'analyst', ?)",
                 ("memory_user", main.hash_password("Passw0rd!secure"), datetime.now(timezone.utc).isoformat()),
             )
             user_id = connection.execute("SELECT id FROM users WHERE username = 'memory_user'").fetchone()[0]
